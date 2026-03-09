@@ -47,9 +47,7 @@ impl GitCli {
             });
         }
 
-        Ok(String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .to_string())
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 }
 
@@ -64,12 +62,9 @@ impl GitOps for GitCli {
             .current_dir(path)
             .output()
             .await
-            .map_err(|e| {
-                SmeltError::io("running git rev-parse --is-inside-work-tree", path, e)
-            })?;
+            .map_err(|e| SmeltError::io("running git rev-parse --is-inside-work-tree", path, e))?;
 
-        Ok(output.status.success()
-            && String::from_utf8_lossy(&output.stdout).trim() == "true")
+        Ok(output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "true")
     }
 
     async fn current_branch(&self) -> Result<String> {

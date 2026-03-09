@@ -34,23 +34,18 @@ pub trait GitOps {
 ///
 /// Returns `(git_binary, repo_root)` on success.
 pub fn preflight() -> Result<(PathBuf, PathBuf)> {
-    let git_binary =
-        which::which("git").map_err(|_| SmeltError::GitNotFound)?;
+    let git_binary = which::which("git").map_err(|_| SmeltError::GitNotFound)?;
 
     let output = std::process::Command::new(&git_binary)
         .args(["rev-parse", "--show-toplevel"])
         .output()
-        .map_err(|e| {
-            SmeltError::io("running git rev-parse --show-toplevel", &git_binary, e)
-        })?;
+        .map_err(|e| SmeltError::io("running git rev-parse --show-toplevel", &git_binary, e))?;
 
     if !output.status.success() {
         return Err(SmeltError::NotAGitRepo);
     }
 
-    let repo_root = PathBuf::from(
-        String::from_utf8_lossy(&output.stdout).trim(),
-    );
+    let repo_root = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
 
     Ok((git_binary, repo_root))
 }

@@ -61,7 +61,10 @@ async fn run() -> anyhow::Result<i32> {
             if smelt_dir.exists() {
                 // Inside a Smelt project — show basic status
                 let git = GitCli::new(git_binary, repo_root.clone());
-                let branch = git.current_branch().await.unwrap_or_else(|_| "unknown".into());
+                let branch = git
+                    .current_branch()
+                    .await
+                    .unwrap_or_else(|_| "unknown".into());
                 let project_name = repo_root
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())

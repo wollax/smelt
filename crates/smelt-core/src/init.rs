@@ -36,7 +36,11 @@ pub fn init_project(repo_root: &Path) -> Result<PathBuf> {
     if let Err(e) = std::fs::write(&config_path, DEFAULT_CONFIG) {
         // Best-effort cleanup — ignore errors during removal.
         let _ = std::fs::remove_dir_all(&smelt_dir);
-        return Err(SmeltError::io("writing .smelt/config.toml", &config_path, e));
+        return Err(SmeltError::io(
+            "writing .smelt/config.toml",
+            &config_path,
+            e,
+        ));
     }
 
     Ok(smelt_dir)
