@@ -1,0 +1,18 @@
+[package]
+name = "smelt-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Smelt core library — git operations, orchestration logic, and domain types"
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+toml.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+which.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,0 +1,40 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/wollax/smelt"
+
+[workspace.dependencies]
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Async
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Terminal
+console = "0.16"
+
+# Utilities
+which = "8"
+
+# Dev/test
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
