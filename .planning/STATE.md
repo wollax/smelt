@@ -3,17 +3,17 @@
 ## Current Position
 
 Phase: 2 of 10 — Worktree Manager
-Plan: 1 of 3 complete
+Plan: 2 of 3 complete
 Status: In progress
-Progress: █▒░░░░░░░░ 1.3/10
+Progress: █▓░░░░░░░░ 1.6/10
 
-Last activity: 2026-03-09 — Completed 02-01-PLAN.md (foundation types & git abstraction)
+Last activity: 2026-03-09 — Completed 02-02-PLAN.md (WorktreeManager create/list + CLI wiring)
 
 ## Session Continuity
 
 Last session: 2026-03-09
-Stopped at: Completed 02-01 (dependencies, error variants, domain types, GitOps extension)
-Resume file: .planning/phases/active/02-worktree-manager/02-02-PLAN.md
+Stopped at: Completed 02-02 (WorktreeManager create/list, CLI worktree subcommands with wt alias)
+Resume file: .planning/phases/active/02-worktree-manager/02-03-PLAN.md
 
 ## Performance Metrics
 
@@ -21,7 +21,7 @@ Resume file: .planning/phases/active/02-worktree-manager/02-02-PLAN.md
 |--------|-------|
 | Phases completed | 1 |
 | Phases remaining | 9 |
-| Plans completed (phase 2) | 1/3 |
+| Plans completed (phase 2) | 2/3 |
 | Requirements covered | 1/12 |
 | Blockers | 0 |
 | Technical debt items | 0 |
@@ -51,6 +51,11 @@ Resume file: .planning/phases/active/02-worktree-manager/02-02-PLAN.md
 - WorktreeState serializes to per-session TOML files in .smelt/worktrees/
 - SessionStatus enum: Created/Running/Completed/Failed/Orphaned (serde rename_all lowercase)
 - parse_porcelain() handles git worktree list --porcelain output including bare, detached, locked states
+- WorktreeManager<G: GitOps> coordinates git ops + state file I/O
+- Worktree paths stored as relative (`../repo-smelt-session`) in TOML, resolved at runtime
+- Branch naming: `smelt/<session_name>`, dir naming: `<repo>-smelt-<session>`
+- init creates .smelt/worktrees/ directory alongside config.toml
+- CLI: `smelt worktree create|list` with `smelt wt` visible alias
 
 ### Blockers
 
