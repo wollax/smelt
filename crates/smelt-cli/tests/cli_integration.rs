@@ -303,3 +303,65 @@ fn test_worktree_remove_nonexistent() {
         .code(1)
         .stderr(predicate::str::contains("not found"));
 }
+
+#[test]
+fn test_worktree_remove_dirty_with_force() {
+    let tmp = setup_git_repo();
+    smelt_cmd(tmp.path()).arg("init").assert().success();
+
+    // Create worktree
+    smelt_cmd(tmp.path())
+        .args(["worktree", "create", "dirty-test"])
+        .assert()
+        .success();
+
+    // Make the worktree dirty by writing an untracked file
+    let tmp_dir_name = tmp.path().file_name().unwrap().to_string_lossy().to_string();
+    let wt_dir = tmp
+        .path()
+        .parent()
+        .unwrap()
+        .join(format!("{tmp_dir_name}-smelt-dirty-test"));
+    std::fs::write(wt_dir.join("dirty-file.txt"), "dirty\n").expect("write dirty file");
+
+    // Remove with --force --yes should succeed even with dirty worktree
+    smelt_cmd(tmp.path())
+        .args(["worktree", "remove", "dirty-test", "--force", "--yes"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Removed worktree 'dirty-test'"));
+
+    // Cleanup
+    cleanup_worktree_sibling(&tmp, "dirty-test");
+}
+
+#[test]
+fn test_worktree_remove_dirty_with_yes_auto_confirms() {
+    let tmp = setup_git_repo();
+    smelt_cmd(tmp.path()).arg("init").assert().success();
+
+    // Create worktree
+    smelt_cmd(tmp.path())
+        .args(["worktree", "create", "dirty-yes-test"])
+        .assert()
+        .success();
+
+    // Make the worktree dirty
+    let tmp_dir_name = tmp.path().file_name().unwrap().to_string_lossy().to_string();
+    let wt_dir = tmp
+        .path()
+        .parent()
+        .unwrap()
+        .join(format!("{tmp_dir_name}-smelt-dirty-yes-test"));
+    std::fs::write(wt_dir.join("dirty-file.txt"), "dirty\n").expect("write dirty file");
+
+    // Remove with --yes (no --force) should auto-confirm and force remove
+    smelt_cmd(tmp.path())
+        .args(["worktree", "remove", "dirty-yes-test", "--yes"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Removed worktree 'dirty-yes-test'"));
+
+    // Cleanup
+    cleanup_worktree_sibling(&tmp, "dirty-yes-test");
+}

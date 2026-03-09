@@ -185,28 +185,30 @@ pub async fn execute_remove(
             Ok(1)
         }
         Err(SmeltError::WorktreeDirty { name }) => {
-            // Prompt for confirmation if interactive
-            if !yes {
-                let confirmed = dialoguer::Confirm::new()
+            let should_force = if yes {
+                // --yes flag: auto-confirm
+                true
+            } else {
+                // Prompt for confirmation if interactive
+                dialoguer::Confirm::new()
                     .with_prompt(format!(
                         "Worktree '{name}' has uncommitted changes. Remove anyway?"
                     ))
                     .default(false)
                     .interact()
-                    .unwrap_or(false);
+                    .unwrap_or(false)
+            };
 
-                if confirmed {
-                    // Retry with force
-                    let result = manager.remove(&name, true).await?;
-                    print_remove_result(&result);
-                    return Ok(0);
-                }
+            if should_force {
+                let result = manager.remove(&name, true).await?;
+                print_remove_result(&result);
+                Ok(0)
+            } else {
+                eprintln!(
+                    "Error: worktree '{name}' has uncommitted changes (use --force to override)"
+                );
+                Ok(1)
             }
-
-            eprintln!(
-                "Error: worktree '{name}' has uncommitted changes (use --force to override)"
-            );
-            Ok(1)
         }
         Err(SmeltError::BranchUnmerged { branch }) => {
             eprintln!(
