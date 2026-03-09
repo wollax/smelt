@@ -30,6 +30,14 @@ Smelt is a multi-agent orchestration layer that coordinates AI coding sessions i
 3. Git operations (branch create, status, rev-parse) execute correctly via the trait abstraction and produce structured results
 4. CI pipeline runs `cargo build`, `cargo test`, `cargo clippy` on every push
 
+**Plans:**
+
+| Plan | Wave | Title | Tasks |
+|------|------|-------|-------|
+| 01-01 | 1 | Workspace skeleton & CI pipeline | Rust workspace with smelt-cli + smelt-core crates; GitHub Actions CI |
+| 01-02 | 2 | Core library: errors, GitOps, init | SmeltError types, GitOps trait, GitCli impl, preflight(), init_project(), unit tests |
+| 01-03 | 3 | CLI binary & integration tests | Clap CLI with init command, context-aware no-args, --no-color, integration tests |
+
 ### Phase 2: Worktree Manager
 
 **Goal:** Implement worktree lifecycle management — create, track, list, remove, and cleanup worktrees for agent sessions. Address critical pitfalls: orphaned worktree detection, branch collision prevention, and HEAD/index isolation (always specify worktree path in git commands).
