@@ -8,6 +8,18 @@ Smelt is an orchestration layer for autonomous, spec-driven software development
 
 Autonomous multi-session development orchestration — multiple agents work in parallel on different parts of a codebase, and Smelt merges their work into a single coherent result that passes all quality gates.
 
+## Current Milestone: v0.1.0 Orchestration PoC
+
+**Goal:** Prove that Smelt can coordinate multiple agent sessions in worktrees and merge their outputs into a single coherent branch with AI-assisted conflict resolution.
+
+**Target features:**
+
+- Coordinate 2+ agent sessions working in separate git worktrees on the same repo
+- Support real agent sessions (Claude Code) and simulated/scripted sessions for development and testing
+- Merge agent outputs from multiple worktrees into a single branch
+- AI-assisted conflict resolution with human fallback
+- Git as coordination substrate (no external database or message queue)
+
 ## Requirements
 
 ### Validated
@@ -16,14 +28,19 @@ Autonomous multi-session development orchestration — multiple agents work in p
 
 ### Active
 
-- [ ] Coordinate 2+ Assay-driven agent sessions working in separate worktrees on the same repo
-- [ ] Merge agent outputs from multiple worktrees into a single branch with conflict resolution
+- [ ] Coordinate 2+ agent sessions working in separate worktrees on the same repo
+- [ ] Support real agent sessions (Claude Code) and simulated/scripted sessions
+- [ ] Merge agent outputs from multiple worktrees into a single branch
+- [ ] AI-assisted conflict resolution with human fallback
+- [ ] Use git as the coordination substrate (no external database or message queue)
+
+### Deferred (future milestones)
+
 - [ ] Read Assay gate run records to make merge/reject/retry decisions
 - [ ] Run verification (tests, gates) against the merged result before PR creation
 - [ ] Create PRs on GitHub with structured summaries of what each agent session contributed
 - [ ] Notify humans when intervention is needed (conflicts, gate failures, review requests)
 - [ ] Track cost/token usage across orchestrated sessions
-- [ ] Use git as the coordination substrate (no external database or message queue)
 
 ### Out of Scope
 
@@ -113,4 +130,4 @@ Full brainstorm output from 3 explorer/challenger pairs available at `.planning/
 | Language deferred | Decision should be driven by concrete requirements (git lib quality, IPC model, CLI framework), not preference alone. | — Pending |
 
 ---
-*Last updated: 2026-03-09 after initialization*
+*Last updated: 2026-03-09 — Milestone v0.1.0 started*
