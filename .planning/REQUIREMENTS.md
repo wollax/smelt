@@ -1,0 +1,59 @@
+# Requirements — Milestone v0.1.0 Orchestration PoC
+
+## v0.1.0 Requirements
+
+### Session Management
+
+- [ ] **SESS-01**: User can create and manage git worktrees for agent sessions (create, track, cleanup)
+- [ ] **SESS-02**: User can define a session manifest specifying what each agent should work on
+- [ ] **SESS-03**: User can launch a real Claude Code agent session in a worktree
+- [ ] **SESS-04**: User can launch a scripted/simulated session for development and testing
+
+### Merge & Conflict Resolution
+
+- [ ] **MERGE-01**: User can merge outputs from multiple agent worktrees into a single target branch via sequential merge
+- [ ] **MERGE-02**: User gets AI-assisted conflict resolution when merge conflicts occur
+- [ ] **MERGE-03**: User can escalate to manual resolution when AI conflict resolution fails (human fallback)
+- [ ] **MERGE-04**: System determines optimal merge order to minimize conflicts
+
+### Orchestration
+
+- [ ] **ORCH-01**: Orchestration state is stored via git (no external database or message queue)
+- [ ] **ORCH-02**: User can view a summary of what each agent session contributed
+- [ ] **ORCH-03**: System verifies agents stayed within their assigned scope (scope isolation)
+- [ ] **ORCH-04**: User can define an orchestration plan / task graph for multi-agent work
+
+## Future Requirements (deferred)
+
+- [ ] Read Assay gate run records to make merge/reject/retry decisions
+- [ ] Run verification (tests, gates) against merged result before PR creation
+- [ ] Create PRs on GitHub with structured summaries of session contributions
+- [ ] Notify humans when intervention is needed (conflicts, gate failures, review requests)
+- [ ] Track cost/token usage across orchestrated sessions
+- [ ] Dry-run / simulation mode (validate orchestration without spending tokens)
+
+## Out of Scope
+
+- Container runtime / sandboxing — Smelt orchestrates sessions, not containers
+- Assay integration — deferred to a later milestone
+- PR creation / forge integration — deferred
+- Multi-machine coordination — deferred
+- Cost tracking — deferred
+- Web/mobile companion app — human interaction flows through forge
+
+## Traceability
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| SESS-01 | — | Pending |
+| SESS-02 | — | Pending |
+| SESS-03 | — | Pending |
+| SESS-04 | — | Pending |
+| MERGE-01 | — | Pending |
+| MERGE-02 | — | Pending |
+| MERGE-03 | — | Pending |
+| MERGE-04 | — | Pending |
+| ORCH-01 | — | Pending |
+| ORCH-02 | — | Pending |
+| ORCH-03 | — | Pending |
+| ORCH-04 | — | Pending |
