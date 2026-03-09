@@ -74,18 +74,18 @@ pub fn parse_porcelain(output: &str) -> Vec<GitWorktreeEntry> {
             is_bare = true;
         } else if line == "locked" || line.starts_with("locked ") {
             is_locked = true;
-        } else if line.is_empty() {
-            if let (Some(p_val), Some(h_val)) = (path.take(), head.take()) {
-                entries.push(GitWorktreeEntry {
-                    path: PathBuf::from(p_val),
-                    head: h_val,
-                    branch: branch.take(),
-                    is_bare,
-                    is_locked,
-                });
-                is_bare = false;
-                is_locked = false;
-            }
+        } else if line.is_empty()
+            && let (Some(p_val), Some(h_val)) = (path.take(), head.take())
+        {
+            entries.push(GitWorktreeEntry {
+                path: PathBuf::from(p_val),
+                head: h_val,
+                branch: branch.take(),
+                is_bare,
+                is_locked,
+            });
+            is_bare = false;
+            is_locked = false;
         }
     }
 

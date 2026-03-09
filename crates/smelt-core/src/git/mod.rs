@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 pub use cli::GitCli;
 
 use crate::error::{Result, SmeltError};
+use crate::worktree::GitWorktreeEntry;
 
 /// Async interface for git operations.
 ///
@@ -25,6 +26,47 @@ pub trait GitOps {
 
     /// Return the abbreviated HEAD commit hash.
     fn head_short(&self) -> impl Future<Output = Result<String>> + Send;
+
+    /// Create a new worktree at `path` on branch `branch_name`, based on `start_point`.
+    fn worktree_add(
+        &self,
+        path: &Path,
+        branch_name: &str,
+        start_point: &str,
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// Remove a worktree. If `force` is true, removes even with uncommitted changes.
+    fn worktree_remove(
+        &self,
+        path: &Path,
+        force: bool,
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// List worktrees in porcelain format.
+    fn worktree_list(&self) -> impl Future<Output = Result<Vec<GitWorktreeEntry>>> + Send;
+
+    /// Prune stale worktree metadata.
+    fn worktree_prune(&self) -> impl Future<Output = Result<()>> + Send;
+
+    /// Check if a worktree path has uncommitted changes.
+    fn worktree_is_dirty(&self, path: &Path) -> impl Future<Output = Result<bool>> + Send;
+
+    /// Delete a branch. `force` = true uses `-D` (ignores merge status).
+    fn branch_delete(
+        &self,
+        branch_name: &str,
+        force: bool,
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// Check if a branch is merged into `base_ref`.
+    fn branch_is_merged(
+        &self,
+        branch_name: &str,
+        base_ref: &str,
+    ) -> impl Future<Output = Result<bool>> + Send;
+
+    /// Check if a branch exists.
+    fn branch_exists(&self, branch_name: &str) -> impl Future<Output = Result<bool>> + Send;
 }
 
 /// Synchronous preflight checks run before the async runtime is fully engaged.
