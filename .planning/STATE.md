@@ -3,26 +3,26 @@
 ## Current Position
 
 Phase: 2 of 10 — Worktree Manager
-Plan: 2 of 3 complete
-Status: In progress
-Progress: █▓░░░░░░░░ 1.6/10
+Plan: 3 of 3 complete
+Status: Phase complete
+Progress: ██░░░░░░░░ 2/10
 
-Last activity: 2026-03-09 — Completed 02-02-PLAN.md (WorktreeManager create/list + CLI wiring)
+Last activity: 2026-03-09 — Completed 02-03-PLAN.md (remove, orphan detection, prune, integration tests)
 
 ## Session Continuity
 
 Last session: 2026-03-09
-Stopped at: Completed 02-02 (WorktreeManager create/list, CLI worktree subcommands with wt alias)
-Resume file: .planning/phases/active/02-worktree-manager/02-03-PLAN.md
+Stopped at: Completed Phase 2 — Worktree Manager (all 3 plans done)
+Resume file: .planning/phases/active/03-*/03-01-PLAN.md
 
 ## Performance Metrics
 
 | Metric | Value |
 |--------|-------|
-| Phases completed | 1 |
-| Phases remaining | 9 |
-| Plans completed (phase 2) | 2/3 |
-| Requirements covered | 1/12 |
+| Phases completed | 2 |
+| Phases remaining | 8 |
+| Plans completed (phase 2) | 3/3 |
+| Requirements covered | 2/12 |
 | Blockers | 0 |
 | Technical debt items | 0 |
 
@@ -55,7 +55,11 @@ Resume file: .planning/phases/active/02-worktree-manager/02-03-PLAN.md
 - Worktree paths stored as relative (`../repo-smelt-session`) in TOML, resolved at runtime
 - Branch naming: `smelt/<session_name>`, dir naming: `<repo>-smelt-<session>`
 - init creates .smelt/worktrees/ directory alongside config.toml
-- CLI: `smelt worktree create|list` with `smelt wt` visible alias
+- CLI: `smelt worktree create|list|remove|prune` with `smelt wt` visible alias
+- Orphan detection uses three signals: PID liveness, staleness threshold (24h), git worktree cross-reference
+- Only Running sessions can become orphaned
+- remove() sequence: check dirty → worktree remove → check merged → branch delete → state file remove → git worktree prune
+- dialoguer::Confirm used for interactive dirty worktree confirmation
 
 ### Blockers
 
