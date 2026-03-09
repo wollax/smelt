@@ -1,9 +1,11 @@
 //! Worktree state types for Smelt session tracking.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+use crate::error::{Result, SmeltError};
 
 /// Status of a worktree session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,6 +32,33 @@ pub struct WorktreeState {
     pub exit_code: Option<i32>,
     pub task_description: Option<String>,
     pub file_scope: Option<Vec<String>>,
+}
+
+impl WorktreeState {
+    /// Load a `WorktreeState` from a TOML file.
+    pub fn load(path: &Path) -> Result<Self> {
+        let content = std::fs::read_to_string(path).map_err(|e| {
+            SmeltError::io("reading worktree state file", path, e)
+        })?;
+        toml::from_str(&content).map_err(|e| {
+            SmeltError::StateDeserialization(format!("{}: {e}", path.display()))
+        })
+    }
+
+    /// Save this `WorktreeState` to a TOML file.
+    pub fn save(&self, path: &Path) -> Result<()> {
+        let content = toml::to_string(self).map_err(|e| {
+            SmeltError::StateDeserialization(format!("serialization: {e}"))
+        })?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                SmeltError::io("creating worktree state directory", parent, e)
+            })?;
+        }
+        std::fs::write(path, content).map_err(|e| {
+            SmeltError::io("writing worktree state file", path, e)
+        })
+    }
 }
 
 /// Entry from `git worktree list --porcelain`.

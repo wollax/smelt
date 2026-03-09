@@ -43,6 +43,17 @@ pub fn init_project(repo_root: &Path) -> Result<PathBuf> {
         ));
     }
 
+    // Create worktrees state directory
+    let worktrees_dir = smelt_dir.join("worktrees");
+    if let Err(e) = std::fs::create_dir(&worktrees_dir) {
+        let _ = std::fs::remove_dir_all(&smelt_dir);
+        return Err(SmeltError::io(
+            "creating .smelt/worktrees directory",
+            &worktrees_dir,
+            e,
+        ));
+    }
+
     Ok(smelt_dir)
 }
 

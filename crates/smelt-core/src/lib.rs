@@ -8,3 +8,4 @@ pub mod worktree;
 pub use error::{Result, SmeltError};
 pub use git::{GitCli, GitOps, preflight};
 pub use init::init_project;
+pub use worktree::{CreateWorktreeOpts, WorktreeInfo, WorktreeManager};
