@@ -4,7 +4,7 @@
 
 ### Session Management
 
-- [ ] **SESS-01**: User can create and manage git worktrees for agent sessions (create, track, cleanup)
+- [x] **SESS-01**: User can create and manage git worktrees for agent sessions (create, track, cleanup)
 - [ ] **SESS-02**: User can define a session manifest specifying what each agent should work on
 - [ ] **SESS-03**: User can launch a real Claude Code agent session in a worktree
 - [ ] **SESS-04**: User can launch a scripted/simulated session for development and testing
@@ -45,7 +45,7 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SESS-01 | Phase 2: Worktree Manager | Pending |
+| SESS-01 | Phase 2: Worktree Manager | Complete |
 | SESS-02 | Phase 3: Session Manifest & Scripted Sessions | Pending |
 | SESS-03 | Phase 10: Real Agent Sessions | Pending |
 | SESS-04 | Phase 3: Session Manifest & Scripted Sessions | Pending |

@@ -179,7 +179,7 @@ Smelt is a multi-agent orchestration layer that coordinates AI coding sessions i
 | Phase | Name | Requirements | Status |
 |-------|------|-------------|--------|
 | 1 | Project Bootstrap & Git Operations Layer | ORCH-01 | Complete |
-| 2 | Worktree Manager | SESS-01 | Pending |
+| 2 | Worktree Manager | SESS-01 | Complete |
 | 3 | Session Manifest & Scripted Sessions | SESS-02, SESS-04 | Pending |
 | 4 | Sequential Merge | MERGE-01 | Pending |
 | 5 | Merge Order Intelligence | MERGE-04 | Pending |
