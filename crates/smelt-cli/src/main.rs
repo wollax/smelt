@@ -1,3 +1,93 @@
-fn main() {
-    println!("smelt");
+//! Smelt CLI — multi-agent orchestration for git.
+
+mod commands;
+
+use clap::{CommandFactory, Parser, Subcommand};
+use smelt_core::{GitCli, GitOps};
+
+#[derive(Parser)]
+#[command(
+    name = "smelt",
+    about = "Multi-agent orchestration for git",
+    propagate_version = true,
+    version
+)]
+struct Cli {
+    /// Disable colored output
+    #[arg(long)]
+    no_color: bool,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Initialize a new Smelt project in the current repository
+    Init,
+}
+
+async fn run() -> anyhow::Result<i32> {
+    let cli = Cli::try_parse().unwrap_or_else(|e| e.exit());
+
+    if cli.no_color {
+        console::set_colors_enabled(false);
+        console::set_colors_enabled_stderr(false);
+    }
+
+    // Initialize tracing subscriber
+    let env_filter = tracing_subscriber::EnvFilter::try_from_env("SMELT_LOG")
+        .or_else(|_| tracing_subscriber::EnvFilter::try_from_env("RUST_LOG"))
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));
+
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_writer(std::io::stderr)
+        .init();
+
+    // Preflight: locate git binary and repo root
+    let (git_binary, repo_root) = match smelt_core::preflight() {
+        Ok(result) => result,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            return Ok(1);
+        }
+    };
+
+    match cli.command {
+        Some(Commands::Init) => commands::init::execute(&repo_root),
+        None => {
+            let smelt_dir = repo_root.join(".smelt");
+            if smelt_dir.exists() {
+                // Inside a Smelt project — show basic status
+                let git = GitCli::new(git_binary, repo_root.clone());
+                let branch = git.current_branch().await.unwrap_or_else(|_| "unknown".into());
+                let project_name = repo_root
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "unknown".into());
+                println!("Smelt project: {project_name}");
+                println!("Branch: {branch}");
+                Ok(0)
+            } else {
+                eprintln!("Not a Smelt project. Run `smelt init` to get started.");
+                // Print help to stderr as guidance
+                let mut cmd = Cli::command();
+                cmd.print_help()?;
+                eprintln!();
+                Ok(1)
+            }
+        }
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    match run().await {
+        Ok(code) => std::process::exit(code),
+        Err(e) => {
+            eprintln!("Error: {e:#}");
+            std::process::exit(1);
+        }
+    }
 }
