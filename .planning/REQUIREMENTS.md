@@ -21,7 +21,7 @@
 - [x] **ORCH-01**: Orchestration state is stored via git (no external database or message queue)
 - [ ] **ORCH-02**: User can view a summary of what each agent session contributed
 - [ ] **ORCH-03**: System verifies agents stayed within their assigned scope (scope isolation)
-- [ ] **ORCH-04**: User can define an orchestration plan / task graph for multi-agent work
+- [x] **ORCH-04**: User can define an orchestration plan / task graph for multi-agent work
 
 ## Future Requirements (deferred)
 
@@ -56,4 +56,4 @@
 | ORCH-01 | Phase 1: Project Bootstrap & Git Operations Layer | Complete |
 | ORCH-02 | Phase 9: Session Summary & Scope Isolation | Pending |
 | ORCH-03 | Phase 9: Session Summary & Scope Isolation | Pending |
-| ORCH-04 | Phase 8: Orchestration Plan & Task Graph | Pending |
+| ORCH-04 | Phase 8: Orchestration Plan & Task Graph | Complete |
