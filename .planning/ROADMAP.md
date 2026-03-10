@@ -176,6 +176,14 @@ Smelt is a multi-agent orchestration layer that coordinates AI coding sessions i
 3. The orchestrator drives the full lifecycle: plan → create worktrees → launch sessions → wait → merge → resolve → report
 4. Plan execution can be interrupted and resumed (crash recovery via git-native state)
 
+**Plans:**
+
+| Plan | Wave | Title | Tasks |
+|------|------|-------|-------|
+| 08-01 | 1 | Foundation: deps, manifest extensions, DAG builder, orchestration types | Workspace deps (petgraph, indicatif, tokio-util), manifest depends_on/parallel_by_default/on_failure with validation, orchestrate module with types (FailurePolicy, RunState, SessionRunState) and DAG builder (build_dag, ready_set, mark_skipped_dependents) |
+| 08-02 | 2 | Core: State persistence + Orchestrator execution engine | RunStateManager for .smelt/runs/ persistence, Orchestrator struct with run()/resume() using JoinSet for parallel dispatch, failure policy enforcement, merge phase integration |
+| 08-03 | 3 | CLI: `smelt orchestrate run` + dashboard + integration tests | CLI command with indicatif dashboard, comfy-table summary, --json output, Ctrl-C handling, resume detection, integration tests for parallel/sequential/diamond/failure scenarios |
+
 ### Phase 9: Session Summary & Scope Isolation
 
 **Goal:** After sessions complete and merge, provide a structured summary of what each agent contributed (files changed, lines added/removed, commit messages). Verify that agents stayed within their assigned scope — flag sessions that modified files outside their task description.
