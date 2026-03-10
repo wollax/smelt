@@ -3,26 +3,26 @@
 ## Current Position
 
 Phase: 4 of 10 — Sequential Merge
-Plan: 2 of 3 complete
-Status: In progress
-Progress: ███▒░░░░░░ 4/10
+Plan: 3 of 3 complete
+Status: Phase complete
+Progress: ████░░░░░░ 4/10
 
-Last activity: 2026-03-10 — Completed 04-02-PLAN.md (MergeRunner core merge engine)
+Last activity: 2026-03-10 — Completed 04-03-PLAN.md (CLI merge command + integration tests)
 
 ## Session Continuity
 
-Last session: 2026-03-10T12:26:00Z
-Stopped at: Completed 04-02-PLAN.md
-Resume file: .planning/phases/active/04-sequential-merge/04-03-PLAN.md
+Last session: 2026-03-10T12:32:11Z
+Stopped at: Completed Phase 04 (Sequential Merge)
+Resume file: .planning/phases/pending/05-merge-order/05-PLAN.md
 
 ## Performance Metrics
 
 | Metric | Value |
 |--------|-------|
-| Phases completed | 3 |
-| Phases remaining | 7 |
-| Plans completed (phase 4) | 2/3 |
-| Requirements covered | 3/12 |
+| Phases completed | 4 |
+| Phases remaining | 6 |
+| Plans completed (phase 4) | 3/3 |
+| Requirements covered | 4/12 |
 | Blockers | 0 |
 | Technical debt items | 0 |
 
@@ -88,6 +88,9 @@ Resume file: .planning/phases/active/04-sequential-merge/04-03-PLAN.md
 - diff_numstat with `{hash}^` parent ref for per-session stats
 - WorktreeManager::remove(force=true) reused for session cleanup after successful merge
 - MergeRunner collects sessions in manifest order — deterministic merge sequence
+- CLI `smelt merge <manifest>` with `--target` flag for branch name override
+- Post-hoc progress from MergeReport (no real-time callbacks in Phase 4)
+- SessionRunner updates WorktreeState status after execution (Completed/Failed)
 
 ### Blockers
 
