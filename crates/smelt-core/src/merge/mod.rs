@@ -1,12 +1,17 @@
 //! Sequential merge engine for combining completed session worktrees.
 
+pub mod ordering;
 pub mod types;
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use tracing::{info, warn};
 
-pub use types::{DiffStat, MergeOpts, MergeReport, MergeSessionResult};
+pub use types::{
+    DiffStat, MergeOpts, MergeOrderStrategy, MergePlan, MergeReport, MergeSessionResult,
+    PairwiseOverlap, SessionPlanEntry,
+};
 
 use crate::error::{Result, SmeltError};
 use crate::git::GitOps;
@@ -15,10 +20,12 @@ use crate::worktree::state::{SessionStatus, WorktreeState};
 use crate::worktree::WorktreeManager;
 
 /// A completed session ready for merging.
-struct CompletedSession {
-    session_name: String,
-    branch_name: String,
-    task_description: Option<String>,
+pub(crate) struct CompletedSession {
+    pub(crate) session_name: String,
+    pub(crate) branch_name: String,
+    pub(crate) task_description: Option<String>,
+    pub(crate) changed_files: HashSet<String>,
+    pub(crate) original_index: usize,
 }
 
 /// Orchestrates the full merge sequence: reads session states, creates a target
@@ -35,6 +42,33 @@ impl<G: GitOps + Clone> MergeRunner<G> {
         Self { git, repo_root }
     }
 
+    /// Resolve effective strategy: CLI flag > manifest field > default.
+    fn resolve_strategy(opts: &MergeOpts, manifest: &Manifest) -> MergeOrderStrategy {
+        opts.strategy
+            .or(manifest.manifest.merge_strategy)
+            .unwrap_or_default()
+    }
+
+    /// Compute a merge plan without executing the merge.
+    ///
+    /// Validates state, collects sessions, resolves strategy, and computes ordering.
+    /// Does NOT create branches, worktrees, or perform any merges.
+    pub async fn plan(&self, manifest: &Manifest, opts: MergeOpts) -> Result<MergePlan> {
+        let smelt_dir = self.repo_root.join(".smelt");
+
+        if !smelt_dir.exists() {
+            return Err(SmeltError::NotInitialized);
+        }
+
+        let (completed, _skipped) = self.collect_sessions(manifest, &smelt_dir).await?;
+
+        let strategy = Self::resolve_strategy(&opts, manifest);
+
+        let (_ordered, merge_plan) = ordering::order_sessions(completed, strategy);
+
+        Ok(merge_plan)
+    }
+
     /// Run the full merge pipeline for a manifest.
     pub async fn run(&self, manifest: &Manifest, opts: MergeOpts) -> Result<MergeReport> {
         let smelt_dir = self.repo_root.join(".smelt");
@@ -45,8 +79,23 @@ impl<G: GitOps + Clone> MergeRunner<G> {
             return Err(SmeltError::NotInitialized);
         }
 
-        // 2-6. Read session states and filter
-        let (completed, skipped) = self.collect_sessions(manifest, &smelt_dir)?;
+        // 2-6. Read session states and filter, populate changed files
+        let (completed, skipped) = self.collect_sessions(manifest, &smelt_dir).await?;
+
+        // Resolve effective strategy: CLI > manifest > default
+        let strategy = Self::resolve_strategy(&opts, manifest);
+
+        // Order sessions according to strategy
+        let (ordered, merge_plan) = ordering::order_sessions(completed, strategy);
+        info!(
+            "Merge order strategy: {}{}",
+            strategy,
+            if merge_plan.fell_back {
+                " (fell back to completion-time)"
+            } else {
+                ""
+            }
+        );
 
         // Phase B: Target branch setup
         // 7. Determine target branch name
@@ -94,7 +143,7 @@ impl<G: GitOps + Clone> MergeRunner<G> {
 
         // Phase D + E: Sequential merge loop + cleanup
         let result = self
-            .merge_sessions(&completed, &temp_path, &target_branch)
+            .merge_sessions(&ordered, &temp_path, &target_branch)
             .await;
 
         match result {
@@ -107,7 +156,7 @@ impl<G: GitOps + Clone> MergeRunner<G> {
 
                 // 16. Clean up session worktrees and branches
                 let manager = WorktreeManager::new(self.git.clone(), self.repo_root.clone());
-                for session in &completed {
+                for session in &ordered {
                     if let Err(e) = manager.remove(&session.session_name, true).await {
                         warn!(
                             "failed to clean up session '{}': {e}",
@@ -132,6 +181,7 @@ impl<G: GitOps + Clone> MergeRunner<G> {
                     total_files_changed,
                     total_insertions,
                     total_deletions,
+                    plan: Some(merge_plan),
                 })
             }
             Err(e) => {
@@ -150,7 +200,8 @@ impl<G: GitOps + Clone> MergeRunner<G> {
     }
 
     /// Collect completed sessions from manifest, checking for running sessions.
-    fn collect_sessions(
+    /// Populates `changed_files` for each session via `diff_name_only`.
+    async fn collect_sessions(
         &self,
         manifest: &Manifest,
         smelt_dir: &Path,
@@ -159,7 +210,7 @@ impl<G: GitOps + Clone> MergeRunner<G> {
         let mut completed = Vec::new();
         let mut skipped = Vec::new();
 
-        for session_def in &manifest.sessions {
+        for (idx, session_def) in manifest.sessions.iter().enumerate() {
             let state_file = worktrees_dir.join(format!("{}.toml", session_def.name));
             if !state_file.exists() {
                 warn!(
@@ -188,10 +239,38 @@ impl<G: GitOps + Clone> MergeRunner<G> {
                     });
                 }
                 SessionStatus::Completed => {
+                    // Determine the merge base for this session
+                    let base_ref = session_def
+                        .base_ref
+                        .as_deref()
+                        .unwrap_or(&manifest.manifest.base_ref);
+                    let (changed_files, files_unavailable) = match self
+                        .git
+                        .diff_name_only(base_ref, &state.branch_name)
+                        .await
+                    {
+                        Ok(files) => (files.into_iter().collect::<HashSet<String>>(), false),
+                        Err(e) => {
+                            warn!(
+                                "failed to get changed files for session '{}': {e} \
+                                 (file-overlap ordering may be inaccurate)",
+                                session_def.name
+                            );
+                            (HashSet::new(), true)
+                        }
+                    };
+                    if files_unavailable {
+                        warn!(
+                            "session '{}' has no file data — overlap scoring will treat it as zero-overlap",
+                            session_def.name
+                        );
+                    }
                     completed.push(CompletedSession {
                         session_name: state.session_name.clone(),
                         branch_name: state.branch_name.clone(),
                         task_description: state.task_description.clone(),
+                        changed_files,
+                        original_index: idx,
                     });
                 }
                 ref status => {
@@ -424,6 +503,7 @@ mod tests {
             manifest: ManifestMeta {
                 name: name.to_string(),
                 base_ref: "HEAD".to_string(),
+                merge_strategy: None,
             },
             sessions: sessions
                 .iter()
@@ -605,14 +685,151 @@ mod tests {
         let report = runner
             .run(
                 &manifest,
-                MergeOpts {
-                    target_branch: Some("my-custom-branch".to_string()),
-                },
+                MergeOpts::with_target_branch("my-custom-branch".to_string()),
             )
             .await
             .expect("merge should succeed");
 
         assert_eq!(report.target_branch, "my-custom-branch");
         assert!(git.branch_exists("my-custom-branch").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_plan_returns_merge_plan() {
+        let (_tmp, git, repo_path) = setup_test_repo();
+        init_smelt(&repo_path);
+
+        create_test_session(&git, &repo_path, "alpha", &[("a.txt", "alpha\n")], None).await;
+        create_test_session(&git, &repo_path, "beta", &[("b.txt", "beta\n")], None).await;
+
+        let manifest = make_manifest("plan-test", &[("alpha", None), ("beta", None)]);
+        let runner = MergeRunner::new(git.clone(), repo_path.clone());
+        let plan = runner
+            .plan(&manifest, MergeOpts::default())
+            .await
+            .expect("plan should succeed");
+
+        assert_eq!(plan.sessions.len(), 2);
+        assert_eq!(plan.sessions[0].session_name, "alpha");
+        assert_eq!(plan.sessions[1].session_name, "beta");
+        assert_eq!(plan.strategy, MergeOrderStrategy::CompletionTime);
+        assert!(!plan.fell_back);
+
+        // Plan is read-only — no branches or worktrees should be created
+        assert!(
+            !git.branch_exists("smelt/merge/plan-test").await.unwrap(),
+            "plan() should not create a target branch"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_plan_file_overlap_strategy() {
+        let (_tmp, git, repo_path) = setup_test_repo();
+        init_smelt(&repo_path);
+
+        // Session A: shared.rs, a_only.rs
+        create_test_session(
+            &git,
+            &repo_path,
+            "sess-a",
+            &[("shared.rs", "shared-a\n"), ("a_only.rs", "a\n")],
+            None,
+        )
+        .await;
+        // Session B: shared.rs, b_only.rs
+        create_test_session(
+            &git,
+            &repo_path,
+            "sess-b",
+            &[("shared.rs", "shared-b\n"), ("b_only.rs", "b\n")],
+            None,
+        )
+        .await;
+        // Session C: c_only.rs (no overlap)
+        create_test_session(
+            &git,
+            &repo_path,
+            "sess-c",
+            &[("c_only.rs", "c\n")],
+            None,
+        )
+        .await;
+
+        let manifest = make_manifest(
+            "overlap-plan",
+            &[("sess-a", None), ("sess-b", None), ("sess-c", None)],
+        );
+        let runner = MergeRunner::new(git.clone(), repo_path.clone());
+        let plan = runner
+            .plan(
+                &manifest,
+                MergeOpts::with_strategy(MergeOrderStrategy::FileOverlap),
+            )
+            .await
+            .expect("plan should succeed");
+
+        assert_eq!(plan.strategy, MergeOrderStrategy::FileOverlap);
+        assert!(!plan.fell_back);
+
+        // A should be first (tiebreak by index), C before B (C has 0 overlap after A)
+        assert_eq!(plan.sessions[0].session_name, "sess-a");
+        assert_eq!(plan.sessions[1].session_name, "sess-c");
+        assert_eq!(plan.sessions[2].session_name, "sess-b");
+
+        // Check pairwise overlaps contain A-B overlap on shared.rs
+        let ab_overlap = plan
+            .pairwise_overlaps
+            .iter()
+            .find(|p| {
+                (p.session_a == "sess-a" && p.session_b == "sess-b")
+                    || (p.session_a == "sess-b" && p.session_b == "sess-a")
+            })
+            .expect("should have A-B overlap");
+        assert!(ab_overlap.overlapping_files.contains(&"shared.rs".to_string()));
+        assert!(ab_overlap.overlap_count() >= 1);
+    }
+
+    #[tokio::test]
+    async fn test_plan_strategy_from_manifest() {
+        let (_tmp, git, repo_path) = setup_test_repo();
+        init_smelt(&repo_path);
+
+        create_test_session(&git, &repo_path, "s1", &[("x.txt", "x\n")], None).await;
+        create_test_session(&git, &repo_path, "s2", &[("y.txt", "y\n")], None).await;
+
+        let mut manifest = make_manifest("manifest-strat", &[("s1", None), ("s2", None)]);
+        manifest.manifest.merge_strategy = Some(MergeOrderStrategy::FileOverlap);
+
+        let runner = MergeRunner::new(git.clone(), repo_path.clone());
+        let plan = runner
+            .plan(&manifest, MergeOpts::default())
+            .await
+            .expect("plan should succeed");
+
+        assert_eq!(plan.strategy, MergeOrderStrategy::FileOverlap);
+    }
+
+    #[tokio::test]
+    async fn test_plan_cli_overrides_manifest() {
+        let (_tmp, git, repo_path) = setup_test_repo();
+        init_smelt(&repo_path);
+
+        create_test_session(&git, &repo_path, "s1", &[("x.txt", "x\n")], None).await;
+        create_test_session(&git, &repo_path, "s2", &[("y.txt", "y\n")], None).await;
+
+        let mut manifest = make_manifest("cli-override", &[("s1", None), ("s2", None)]);
+        manifest.manifest.merge_strategy = Some(MergeOrderStrategy::CompletionTime);
+
+        let runner = MergeRunner::new(git.clone(), repo_path.clone());
+        let plan = runner
+            .plan(
+                &manifest,
+                MergeOpts::with_strategy(MergeOrderStrategy::FileOverlap),
+            )
+            .await
+            .expect("plan should succeed");
+
+        // CLI strategy should override manifest
+        assert_eq!(plan.strategy, MergeOrderStrategy::FileOverlap);
     }
 }

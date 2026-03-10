@@ -129,6 +129,14 @@ pub trait GitOps {
     /// Resolve a ref (branch name, HEAD, etc.) to a full commit hash.
     fn rev_parse(&self, rev: &str) -> impl Future<Output = Result<String>> + Send;
 
+    /// List changed file paths between two refs.
+    /// Uses `git diff --name-only base_ref head_ref`.
+    fn diff_name_only(
+        &self,
+        base_ref: &str,
+        head_ref: &str,
+    ) -> impl Future<Output = Result<Vec<String>>> + Send;
+
     /// Get diff stats between two refs. Returns Vec of (insertions, deletions, filename).
     fn diff_numstat(
         &self,

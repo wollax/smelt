@@ -110,6 +110,14 @@ Smelt is a multi-agent orchestration layer that coordinates AI coding sessions i
 2. User can see the chosen merge order before execution (dry-run or plan output)
 3. File-overlap-based ordering produces fewer conflicts than naive ordering when tested with scripted sessions that have known overlap patterns
 
+**Plans:**
+
+| Plan | Wave | Title | Tasks |
+|------|------|-------|-------|
+| 05-01 | 1 | Foundation: MergeOrderStrategy enum, diff_name_only, deps | MergeOrderStrategy enum + MergeOpts/ManifestMeta fields, diff_name_only GitOps method + GitCli impl, comfy-table + serde_json workspace deps |
+| 05-02 | 2 | Core: Ordering algorithms + MergeRunner integration | ordering.rs with greedy file-overlap algorithm, collect_sessions populates changed_files, strategy resolution (CLI > manifest > default), MergePlan type |
+| 05-03 | 3 | CLI: merge run/plan subcommands + table/JSON output | Restructure CLI to merge run\|plan, comfy-table plan display, --json flag, --strategy flag, MergeRunner.plan() dry-run method, integration tests |
+
 ### Phase 6: Human Fallback Resolution
 
 **Goal:** When a merge produces conflicts, present them to the user for manual resolution via the CLI. This is the safety net — built before AI resolution so there is always a working fallback path. The user sees conflict markers, edits files, and confirms resolution.
@@ -190,7 +198,7 @@ Smelt is a multi-agent orchestration layer that coordinates AI coding sessions i
 | 2 | Worktree Manager | SESS-01 | Complete |
 | 3 | Session Manifest & Scripted Sessions | SESS-02, SESS-04 | Complete |
 | 4 | Sequential Merge | MERGE-01 | Complete |
-| 5 | Merge Order Intelligence | MERGE-04 | Pending |
+| 5 | Merge Order Intelligence | MERGE-04 | Complete |
 | 6 | Human Fallback Resolution | MERGE-03 | Pending |
 | 7 | AI Conflict Resolution | MERGE-02 | Pending |
 | 8 | Orchestration Plan & Task Graph | ORCH-04 | Pending |

@@ -2,27 +2,27 @@
 
 ## Current Position
 
-Phase: 4 of 10 — Sequential Merge
+Phase: 5 of 10 — Merge Order Intelligence
 Plan: 3 of 3 complete
-Status: Phase complete
-Progress: ████░░░░░░ 4/10
+Status: Phase 5 complete
+Progress: ██████░░░░ 6/10
 
-Last activity: 2026-03-10 — Completed 04-03-PLAN.md (CLI merge command + integration tests)
+Last activity: 2026-03-10 — Completed 05-03-PLAN.md (CLI Subcommands & Plan Display)
 
 ## Session Continuity
 
-Last session: 2026-03-10T12:32:11Z
-Stopped at: Completed Phase 04 (Sequential Merge)
-Resume file: .planning/phases/pending/05-merge-order/05-PLAN.md
+Last session: 2026-03-10T14:14:00Z
+Stopped at: Completed Phase 5 (all 3 plans)
+Resume file: (next phase)
 
 ## Performance Metrics
 
 | Metric | Value |
 |--------|-------|
-| Phases completed | 4 |
-| Phases remaining | 6 |
-| Plans completed (phase 4) | 3/3 |
-| Requirements covered | 4/12 |
+| Phases completed | 5 |
+| Phases remaining | 5 |
+| Plans completed (phase 5) | 3/3 |
+| Requirements covered | 5/12 |
 | Blockers | 0 |
 | Technical debt items | 0 |
 
@@ -88,9 +88,28 @@ Resume file: .planning/phases/pending/05-merge-order/05-PLAN.md
 - diff_numstat with `{hash}^` parent ref for per-session stats
 - WorktreeManager::remove(force=true) reused for session cleanup after successful merge
 - MergeRunner collects sessions in manifest order — deterministic merge sequence
-- CLI `smelt merge <manifest>` with `--target` flag for branch name override
+- CLI `smelt merge run|plan <manifest>` subcommands (breaking change from `smelt merge <manifest>`)
 - Post-hoc progress from MergeReport (no real-time callbacks in Phase 4)
 - SessionRunner updates WorktreeState status after execution (Completed/Failed)
+- MergeOrderStrategy is #[non_exhaustive] enum with CompletionTime (default) and FileOverlap, serde rename_all kebab-case
+- MergeOpts.strategy and ManifestMeta.merge_strategy are Option<MergeOrderStrategy> — None means use default
+- GitOps::diff_name_only(base_ref, head_ref) returns Vec<String> of changed file paths
+- DiffStat, MergeSessionResult, MergeReport derive Serialize for JSON output
+- comfy-table v7 and serde_json v1 added to workspace dependencies
+- CompletedSession is pub(crate) with changed_files (HashSet<String>) and original_index (usize)
+- collect_sessions() is async — calls diff_name_only per session to populate changed_files
+- order_sessions() dispatches on MergeOrderStrategy, returns (Vec<CompletedSession>, MergePlan)
+- Greedy file-overlap: pick minimum overlap against merged set, tiebreak by original_index
+- Fallback: when all pairwise overlaps equal, falls back to manifest order with fell_back flag
+- MergeReport.plan: Option<MergePlan> populated on successful merge
+- Strategy resolution: opts.strategy > manifest.merge_strategy > Default (CompletionTime)
+- Non-exhaustive wildcard arm removed from order_sessions match — future variants cause compile error
+- MergeRunner::plan() performs dry-run analysis (collect + order) without creating branches/worktrees
+- MergeOpts::new(target_branch, strategy) constructor for cross-crate use of non-exhaustive struct
+- MergePlan, SessionPlanEntry, PairwiseOverlap derive Deserialize for JSON round-trip
+- `merge plan` outputs comfy-table (UTF8_FULL + UTF8_ROUND_CORNERS) by default, JSON with --json
+- `merge run` and `merge plan` both accept --strategy (completion-time|file-overlap) and --target flags
+- format_plan_table shows: merge order table, pairwise overlap table (file-overlap only), per-session file list (truncated at 10)
 
 ### Blockers
 

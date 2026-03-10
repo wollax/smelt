@@ -213,6 +213,7 @@ mod tests {
             manifest: ManifestMeta {
                 name: "test-manifest".to_string(),
                 base_ref: "HEAD".to_string(),
+                merge_strategy: None,
             },
             sessions,
         }

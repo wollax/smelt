@@ -21,6 +21,8 @@ pub struct ManifestMeta {
     pub name: String,
     #[serde(default = "default_base_ref")]
     pub base_ref: String,
+    /// Merge ordering strategy (optional; CLI flag overrides this).
+    pub merge_strategy: Option<crate::merge::types::MergeOrderStrategy>,
 }
 
 fn default_base_ref() -> String {
@@ -257,6 +259,7 @@ files = [
             manifest: ManifestMeta {
                 name: "empty".to_string(),
                 base_ref: "HEAD".to_string(),
+                merge_strategy: None,
             },
             sessions: vec![],
         };

@@ -41,11 +41,8 @@ enum Commands {
 
     /// Merge session outputs into a single branch
     Merge {
-        /// Path to the session manifest file
-        manifest: String,
-        /// Override target branch name
-        #[arg(long)]
-        target: Option<String>,
+        #[command(subcommand)]
+        command: commands::merge::MergeCommands,
     },
 }
 
@@ -110,9 +107,29 @@ async fn run() -> anyhow::Result<i32> {
                 }
             }
         }
-        Some(Commands::Merge { manifest, target }) => {
+        Some(Commands::Merge { command }) => {
             let git = GitCli::new(git_binary, repo_root.clone());
-            commands::merge::execute_merge(git, repo_root, &manifest, target).await
+            match command {
+                commands::merge::MergeCommands::Run {
+                    manifest,
+                    target,
+                    strategy,
+                } => {
+                    commands::merge::execute_merge_run(git, repo_root, &manifest, target, strategy)
+                        .await
+                }
+                commands::merge::MergeCommands::Plan {
+                    manifest,
+                    target,
+                    strategy,
+                    json,
+                } => {
+                    commands::merge::execute_merge_plan(
+                        git, repo_root, &manifest, target, strategy, json,
+                    )
+                    .await
+                }
+            }
         }
         None => {
             let smelt_dir = repo_root.join(".smelt");

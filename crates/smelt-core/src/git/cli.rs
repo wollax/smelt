@@ -309,6 +309,14 @@ impl GitOps for GitCli {
         self.run(&["rev-parse", rev]).await
     }
 
+    async fn diff_name_only(&self, base_ref: &str, head_ref: &str) -> Result<Vec<String>> {
+        let output = self.run(&["diff", "--name-only", base_ref, head_ref]).await?;
+        if output.is_empty() {
+            return Ok(Vec::new());
+        }
+        Ok(output.lines().map(|l| l.to_string()).collect())
+    }
+
     async fn diff_numstat(&self, from_ref: &str, to_ref: &str) -> Result<Vec<(usize, usize, String)>> {
         let output = self.run(&["diff", "--numstat", from_ref, to_ref]).await?;
         if output.is_empty() {
@@ -1132,5 +1140,60 @@ mod tests {
         // Cleanup
         cli.worktree_remove(&wt_path, false).await.expect("worktree_remove");
         let _ = std::fs::remove_dir_all(&wt_path);
+    }
+
+    #[tokio::test]
+    async fn test_diff_name_only() {
+        let (tmp, cli) = setup_test_repo();
+        let git = which::which("git").expect("git on PATH");
+        let default_branch = cli.current_branch().await.expect("current_branch");
+
+        // Create a feature branch with changes
+        std::process::Command::new(&git)
+            .args(["checkout", "-b", "name-only-branch"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("checkout");
+        std::fs::write(tmp.path().join("file_a.txt"), "a\n").unwrap();
+        std::fs::write(tmp.path().join("file_b.txt"), "b\n").unwrap();
+        std::process::Command::new(&git)
+            .args(["add", "file_a.txt", "file_b.txt"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git add");
+        std::process::Command::new(&git)
+            .args(["commit", "-m", "add files"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git commit");
+
+        // Go back to default
+        std::process::Command::new(&git)
+            .args(["checkout", &default_branch])
+            .current_dir(tmp.path())
+            .output()
+            .expect("checkout default");
+
+        let files = cli
+            .diff_name_only(&default_branch, "name-only-branch")
+            .await
+            .expect("diff_name_only");
+
+        assert_eq!(files.len(), 2, "should have 2 changed files");
+        assert!(files.contains(&"file_a.txt".to_string()));
+        assert!(files.contains(&"file_b.txt".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_diff_name_only_empty() {
+        let (_tmp, cli) = setup_test_repo();
+        let default_branch = cli.current_branch().await.expect("current_branch");
+
+        let files = cli
+            .diff_name_only(&default_branch, &default_branch)
+            .await
+            .expect("diff_name_only same ref");
+
+        assert!(files.is_empty(), "same ref should have no diff");
     }
 }
