@@ -25,6 +25,17 @@ pub struct MergeOpts {
 }
 
 impl MergeOpts {
+    /// Create merge options with both target branch and strategy overrides.
+    pub fn new(
+        target_branch: Option<String>,
+        strategy: Option<MergeOrderStrategy>,
+    ) -> Self {
+        Self {
+            target_branch,
+            strategy,
+        }
+    }
+
     /// Create merge options with a custom target branch.
     pub fn with_target_branch(target: String) -> Self {
         Self {
@@ -83,7 +94,7 @@ impl MergeReport {
 }
 
 /// A merge plan showing the computed session order and overlap analysis.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MergePlan {
     /// The strategy used for ordering.
     pub strategy: MergeOrderStrategy,
@@ -96,7 +107,7 @@ pub struct MergePlan {
 }
 
 /// A session entry in the merge plan.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionPlanEntry {
     pub session_name: String,
     pub branch_name: String,
@@ -107,7 +118,7 @@ pub struct SessionPlanEntry {
 }
 
 /// Pairwise file overlap between two sessions.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PairwiseOverlap {
     pub session_a: String,
     pub session_b: String,

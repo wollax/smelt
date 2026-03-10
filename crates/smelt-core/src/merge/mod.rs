@@ -42,6 +42,29 @@ impl<G: GitOps + Clone> MergeRunner<G> {
         Self { git, repo_root }
     }
 
+    /// Compute a merge plan without executing the merge.
+    ///
+    /// Validates state, collects sessions, resolves strategy, and computes ordering.
+    /// Does NOT create branches, worktrees, or perform any merges.
+    pub async fn plan(&self, manifest: &Manifest, opts: MergeOpts) -> Result<MergePlan> {
+        let smelt_dir = self.repo_root.join(".smelt");
+
+        if !smelt_dir.exists() {
+            return Err(SmeltError::NotInitialized);
+        }
+
+        let (completed, _skipped) = self.collect_sessions(manifest, &smelt_dir).await?;
+
+        let strategy = opts
+            .strategy
+            .or(manifest.manifest.merge_strategy)
+            .unwrap_or_default();
+
+        let (_ordered, merge_plan) = ordering::order_sessions(completed, strategy);
+
+        Ok(merge_plan)
+    }
+
     /// Run the full merge pipeline for a manifest.
     pub async fn run(&self, manifest: &Manifest, opts: MergeOpts) -> Result<MergeReport> {
         let smelt_dir = self.repo_root.join(".smelt");
