@@ -38,6 +38,9 @@ pub struct AiConfig {
     pub api_key: Option<String>,
 
     /// Custom endpoint URL for proxies or self-hosted providers.
+    ///
+    /// **Not yet implemented** — reserved for future use with genai's client
+    /// builder. Setting this field currently has no effect.
     pub endpoint: Option<String>,
 }
 
@@ -74,7 +77,17 @@ impl AiConfig {
     /// Returns `None` if the file is unreadable or has no `[ai]` section.
     pub fn load(smelt_dir: &Path) -> Option<AiConfig> {
         let config_path = smelt_dir.join("config.toml");
-        let content = std::fs::read_to_string(&config_path).ok()?;
+        let content = match std::fs::read_to_string(&config_path) {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+            Err(e) => {
+                tracing::warn!(
+                    "failed to read {}: {e}",
+                    config_path.display()
+                );
+                return None;
+            }
+        };
         match toml::from_str::<ConfigFile>(&content) {
             Ok(config_file) => config_file.ai,
             Err(e) => {

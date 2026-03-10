@@ -118,7 +118,7 @@ fn strip_code_fences(s: &str) -> String {
 
     // Strip the closing fence.
     let content = &body_trimmed[..body_trimmed.len() - 3];
-    content.trim_end().to_owned()
+    content.trim().to_owned()
 }
 
 #[cfg(test)]

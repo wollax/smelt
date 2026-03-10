@@ -75,11 +75,14 @@ impl<G: GitOps + Send + Sync, P: AiProvider + 'static> ConflictHandler for AiCon
         for file in files {
             // Extract 3-way context via git index stages.
             // Stage 1 = base (may not exist for new files).
-            let base = self
-                .git
-                .show_index_stage(work_dir, 1, file)
-                .await
-                .unwrap_or_default();
+            let base = match self.git.show_index_stage(work_dir, 1, file).await {
+                Ok(content) => content,
+                Err(e) => {
+                    // Stage 1 absent is expected for new-file conflicts (no common ancestor).
+                    tracing::debug!("stage 1 (base) not available for '{file}': {e}");
+                    String::new()
+                }
+            };
             let ours = self
                 .git
                 .show_index_stage(work_dir, 2, file)

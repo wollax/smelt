@@ -440,7 +440,8 @@ impl<G: GitOps + Clone> MergeRunner<G> {
                                     continue;
                                 }
                                 // Stage all files and commit
-                                self.git.add(temp_path, &["."]).await?;
+                                let file_refs: Vec<&str> = conflict_files.iter().map(|s| s.as_str()).collect();
+                                self.git.add(temp_path, &file_refs).await?;
                                 let commit_msg = format_commit_message(
                                     &session.session_name,
                                     session.task_description.as_deref(),

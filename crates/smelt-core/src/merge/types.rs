@@ -18,6 +18,11 @@ pub enum ConflictAction {
 }
 
 /// How a session's merge was resolved.
+///
+/// Variants `Clean` and `Skipped` are bookkeeping states set by the merge
+/// engine — they never appear inside a [`ConflictAction`]. `Manual`,
+/// `AiAssisted`, and `AiEdited` are returned by conflict handlers via
+/// `ConflictAction::Resolved(method)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ResolutionMethod {
@@ -26,6 +31,7 @@ pub enum ResolutionMethod {
     /// User resolved conflicts manually.
     Manual,
     /// Session was skipped due to unresolved conflicts.
+    /// Set by the merge engine when `ConflictAction::Skip` is chosen.
     Skipped,
     /// AI resolved the conflict and the user accepted the resolution.
     AiAssisted,
@@ -157,7 +163,7 @@ impl MergeReport {
         !self.sessions_skipped.is_empty()
     }
 
-    /// Returns `true` if any sessions had conflicts resolved manually.
+    /// Returns `true` if any sessions had conflicts resolved (manually or by AI).
     pub fn has_resolved(&self) -> bool {
         !self.sessions_resolved.is_empty()
     }

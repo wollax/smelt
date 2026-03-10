@@ -360,6 +360,7 @@ impl<G: GitOps + Send + Sync, P: AiProvider + 'static> AiInteractiveConflictHand
         &self,
         session_name: &str,
         files: &[String],
+        original_contents: &[(String, String)],
         feedback: &str,
         work_dir: &Path,
     ) -> smelt_core::Result<()> {
@@ -372,17 +373,18 @@ impl<G: GitOps + Send + Sync, P: AiProvider + 'static> AiInteractiveConflictHand
         let system_prompt = build_system_prompt();
 
         for file in files {
-            // Read the current conflicted content from disk to build the prompt.
-            // We use the working-tree content which may still have markers.
-            let conflicted = std::fs::read_to_string(work_dir.join(file))
-                .map_err(|e| SmeltError::AiResolution {
-                    message: format!("failed to read conflicted file '{file}': {e}"),
-                })?;
+            // Use original conflicted content (with markers) — not the AI-resolved
+            // content currently on disk — so the LLM has the real conflict context.
+            let conflicted = original_contents
+                .iter()
+                .find(|(f, _)| f == file)
+                .map(|(_, c)| c.as_str())
+                .unwrap_or("");
 
             let original_prompt = build_resolution_prompt(
                 file,
                 "", // base — not available in retry context
-                &conflicted,
+                conflicted,
                 "", // theirs — not available in retry context
                 session_name,
                 None,
@@ -459,10 +461,16 @@ impl<G: GitOps + Send + Sync, P: AiProvider + 'static> ConflictHandler
 
         if original_contents.len() != files.len() {
             eprintln!(
-                "Warning: captured {}/{} conflicted files — fallback may not restore all files",
-                original_contents.len(),
+                "Warning: could not read {}/{} conflicted files — skipping AI resolution",
+                files.len() - original_contents.len(),
                 files.len()
             );
+            let fallback = InteractiveConflictHandler {
+                verbose: self.verbose,
+            };
+            return fallback
+                .handle_conflict(session_name, files, scan, work_dir)
+                .await;
         }
 
         // Attempt AI resolution.
@@ -520,6 +528,7 @@ impl<G: GitOps + Send + Sync, P: AiProvider + 'static> ConflictHandler
                                     .retry_with_feedback(
                                         session_name,
                                         files,
+                                        &original_contents,
                                         &feedback_text,
                                         work_dir,
                                     )
@@ -829,8 +838,7 @@ pub async fn execute_merge_plan(
     match runner.plan(&manifest, opts).await {
         Ok(plan) => {
             if json {
-                let output =
-                    serde_json::to_string_pretty(&plan).expect("MergePlan should serialize");
+                let output = serde_json::to_string_pretty(&plan)?;
                 println!("{output}");
             } else {
                 print!("{}", format_plan_table(&plan));
