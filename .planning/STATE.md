@@ -3,16 +3,16 @@
 ## Current Position
 
 Phase: 8 of 10 — Orchestration Plan & Task Graph
-Plan: 1 of 3 complete
+Plan: 2 of 3 complete
 Status: In progress
-Progress: █████████░ 10/12
+Progress: ██████████░ 11/12
 
-Last activity: 2026-03-10 — Completed 08-01-PLAN.md (orchestration foundation)
+Last activity: 2026-03-10 — Completed 08-02-PLAN.md (orchestrator execution engine)
 
 ## Session Continuity
 
-Last session: 2026-03-10T22:24:45Z
-Stopped at: Completed 08-01-PLAN.md
+Last session: 2026-03-10T22:45:00Z
+Stopped at: Completed 08-02-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -21,8 +21,8 @@ Resume file: None
 |--------|-------|
 | Phases completed | 7 |
 | Phases remaining | 3 |
-| Plans completed (phase 8) | 1/3 |
-| Requirements covered | 10/12 |
+| Plans completed (phase 8) | 2/3 |
+| Requirements covered | 11/12 |
 | Blockers | 0 |
 | Technical debt items | 0 |
 
@@ -159,6 +159,16 @@ Resume file: None
 - mark_skipped_dependents() uses BFS to propagate failure transitively through outgoing edges
 - OrchestrationOpts carries target_branch, strategy, verbose, no_ai, json
 - OrchestrationReport carries run_id, session_results, merge_report, elapsed_secs, outcome
+- RunStateManager wraps .smelt/runs/ directory for state persistence, resume detection, log paths, cleanup
+- compute_manifest_hash uses DefaultHasher (not cryptographic) — sufficient for manifest change detection
+- Orchestrator<G: GitOps + Clone + Send + Sync + 'static> owns git + repo_root
+- Orchestrator::run() lifecycle: build DAG → create worktrees (sequential) → execute sessions (parallel JoinSet) → merge (MergeRunner)
+- Orchestrator::resume() validates manifest hash, then resumes from Sessions or Merging phase
+- Worktree state files (.smelt/worktrees/<session>.toml) updated after session execution for MergeRunner compatibility
+- JoinError panics caught via try_into_panic(), mapped to Failed — never unwrapped
+- CancellationToken child tokens created per session; parent cancel aborts all via join_set.abort_all()
+- Merge phase builds filtered Manifest with only Completed sessions, delegates to MergeRunner::run()
+- Orchestrator composes existing components (WorktreeManager, ScriptExecutor, MergeRunner) — no re-implementation
 
 ### Blockers
 
