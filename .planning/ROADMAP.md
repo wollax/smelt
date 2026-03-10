@@ -132,6 +132,14 @@ Smelt is a multi-agent orchestration layer that coordinates AI coding sessions i
 3. After manual resolution, the merge continues (or the user can abort the entire merge sequence)
 4. The resolution is recorded in the merge commit message (who resolved, method: manual)
 
+**Plans:**
+
+| Plan | Wave | Title | Tasks |
+|------|------|-------|-------|
+| 06-01 | 1 | Foundation: conflict types, marker scanning, log_subjects | ConflictAction/ResolutionMethod enums, ConflictScan/ConflictHunk structs, scan_conflict_markers(), log_subjects GitOps method, MergeOpts/MergeReport extensions |
+| 06-02 | 2 | Core: ConflictHandler trait + merge loop refactor | ConflictHandler trait, NoopConflictHandler, refactored merge_sessions with resolve/skip/abort flow, resume detection, MergeAborted error |
+| 06-03 | 3 | CLI: InteractiveConflictHandler + integration tests | Interactive handler with dialoguer Select, --verbose flag, conflict summary display, resolution status output, integration tests for all three conflict action paths |
+
 ### Phase 7: AI Conflict Resolution
 
 **Goal:** Add AI-assisted conflict resolution as the first attempt before human fallback. The resolver sends conflict context (markers, surrounding code, session descriptions) to an LLM, applies the proposed resolution, and asks for user confirmation. If the AI resolution is rejected or fails, the human fallback from Phase 6 activates.
