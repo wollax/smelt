@@ -7,7 +7,7 @@ use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Table};
 
 use smelt_core::error::SmeltError;
 use smelt_core::merge::{MergeOrderStrategy, MergePlan, MergeRunner};
-use smelt_core::{GitCli, Manifest, MergeOpts};
+use smelt_core::{GitCli, Manifest, MergeOpts, NoopConflictHandler};
 
 /// Subcommands for `smelt merge`.
 #[derive(Subcommand)]
@@ -71,7 +71,7 @@ pub async fn execute_merge_run(
     let runner = MergeRunner::new(git, repo_root);
     let opts = MergeOpts::new(target, strategy, false);
 
-    match runner.run(&manifest, opts).await {
+    match runner.run(&manifest, opts, &NoopConflictHandler).await {
         Ok(report) => {
             // Progress summary to stderr
             for (i, result) in report.sessions_merged.iter().enumerate() {
@@ -127,6 +127,11 @@ pub async fn execute_merge_run(
                 eprintln!("  {f}");
             }
             eprintln!("Target branch rolled back. Session worktrees preserved for inspection.");
+            Ok(1)
+        }
+        Err(SmeltError::MergeAborted { session }) => {
+            eprintln!("Merge aborted by user during session '{session}'.");
+            eprintln!("Target branch rolled back.");
             Ok(1)
         }
         Err(e @ SmeltError::MergeTargetExists { .. }) => {
