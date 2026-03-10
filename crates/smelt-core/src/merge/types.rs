@@ -37,3 +37,10 @@ pub struct MergeReport {
     pub total_insertions: usize,
     pub total_deletions: usize,
 }
+
+impl MergeReport {
+    /// Returns `true` if any sessions were skipped during the merge.
+    pub fn has_skipped(&self) -> bool {
+        !self.sessions_skipped.is_empty()
+    }
+}
