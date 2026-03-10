@@ -114,9 +114,12 @@ async fn run() -> anyhow::Result<i32> {
                     manifest,
                     target,
                     strategy,
+                    verbose,
                 } => {
-                    commands::merge::execute_merge_run(git, repo_root, &manifest, target, strategy)
-                        .await
+                    commands::merge::execute_merge_run(
+                        git, repo_root, &manifest, target, strategy, verbose,
+                    )
+                    .await
                 }
                 commands::merge::MergeCommands::Plan {
                     manifest,

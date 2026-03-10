@@ -1,13 +1,16 @@
 //! `smelt merge` command handler — run and plan subcommands.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
 use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Table};
 
 use smelt_core::error::SmeltError;
+use smelt_core::merge::conflict::ConflictScan;
 use smelt_core::merge::{MergeOrderStrategy, MergePlan, MergeRunner};
-use smelt_core::{GitCli, Manifest, MergeOpts, NoopConflictHandler};
+use smelt_core::{
+    ConflictAction, ConflictHandler, GitCli, Manifest, MergeOpts,
+};
 
 /// Subcommands for `smelt merge`.
 #[derive(Subcommand)]
@@ -22,6 +25,9 @@ pub enum MergeCommands {
         /// Merge ordering strategy (completion-time or file-overlap)
         #[arg(long, value_parser = parse_strategy)]
         strategy: Option<MergeOrderStrategy>,
+        /// Show full conflict context when conflicts occur
+        #[arg(long)]
+        verbose: bool,
     },
     /// Preview the merge order without executing
     Plan {
@@ -44,6 +50,132 @@ fn parse_strategy(s: &str) -> Result<MergeOrderStrategy, String> {
     s.parse()
 }
 
+/// Interactive conflict handler that prompts the user via dialoguer on stderr.
+struct InteractiveConflictHandler {
+    verbose: bool,
+}
+
+impl ConflictHandler for InteractiveConflictHandler {
+    async fn handle_conflict(
+        &self,
+        session_name: &str,
+        files: &[String],
+        scan: &ConflictScan,
+        work_dir: &Path,
+    ) -> smelt_core::Result<ConflictAction> {
+        // If stderr is not a terminal, we cannot prompt interactively.
+        // Propagate the conflict error (same behavior as NoopConflictHandler).
+        if !console::Term::stderr().is_term() {
+            return Err(SmeltError::MergeConflict {
+                session: session_name.to_string(),
+                files: files.to_vec(),
+            });
+        }
+
+        eprintln!("\nConflict in session '{session_name}':");
+        eprintln!("Conflicting files:");
+        for file in files {
+            eprintln!("  {file}");
+        }
+
+        if scan.has_markers {
+            for hunk in &scan.hunks {
+                eprintln!("  lines {}..{}", hunk.start_line, hunk.end_line);
+            }
+
+            if scan.total_conflict_lines < 20 {
+                // Show inline conflict markers for small conflicts
+                for file in files {
+                    let path = work_dir.join(file);
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        let file_scan =
+                            smelt_core::merge::scan_conflict_markers(&content);
+                        if file_scan.has_markers {
+                            eprintln!("\n  --- {file} ---");
+                            let lines: Vec<&str> = content.lines().collect();
+                            for hunk in &file_scan.hunks {
+                                for ln in hunk.start_line..=hunk.end_line {
+                                    if ln <= lines.len() {
+                                        let line = lines[ln - 1];
+                                        let styled = if line.starts_with("<<<<<<<") {
+                                            format!(
+                                                "  {}",
+                                                console::style(line).red()
+                                            )
+                                        } else if line.starts_with("=======") {
+                                            format!(
+                                                "  {}",
+                                                console::style(line).yellow()
+                                            )
+                                        } else if line.starts_with(">>>>>>>") {
+                                            format!(
+                                                "  {}",
+                                                console::style(line).green()
+                                            )
+                                        } else {
+                                            format!("  {line}")
+                                        };
+                                        eprintln!("{styled}");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                eprintln!(
+                    "  ... {} conflict lines — edit externally",
+                    scan.total_conflict_lines
+                );
+            }
+        }
+
+        if self.verbose {
+            eprintln!("\nVerbose: conflict files in worktree at {}", work_dir.display());
+            for file in files {
+                let path = work_dir.join(file);
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    eprintln!("\n  === {file} ===");
+                    for line in content.lines() {
+                        eprintln!("  {line}");
+                    }
+                }
+            }
+        }
+
+        eprintln!("\nResolve conflicts in the files above, then choose an action:");
+
+        let action = tokio::task::spawn_blocking(|| {
+            let items = vec![
+                "Resolve (conflicts fixed, continue)",
+                "Skip (undo this session, continue others)",
+                "Abort (stop merge, rollback)",
+            ];
+            let selection = dialoguer::Select::new()
+                .with_prompt("Action")
+                .items(&items)
+                .default(0)
+                .interact_on(&console::Term::stderr())
+                .map_err(|e| SmeltError::SessionError {
+                    session: String::new(),
+                    message: format!("failed to read user input: {e}"),
+                })?;
+            Ok(match selection {
+                0 => ConflictAction::Resolved,
+                1 => ConflictAction::Skip,
+                _ => ConflictAction::Abort,
+            })
+        })
+        .await
+        .map_err(|e| SmeltError::SessionError {
+            session: session_name.to_string(),
+            message: format!("prompt task failed: {e}"),
+        })??;
+
+        Ok(action)
+    }
+}
+
 /// Execute the `smelt merge run` command.
 ///
 /// Loads a manifest, runs the merge pipeline, prints progress to stderr
@@ -54,6 +186,7 @@ pub async fn execute_merge_run(
     manifest_path: &str,
     target: Option<String>,
     strategy: Option<MergeOrderStrategy>,
+    verbose: bool,
 ) -> anyhow::Result<i32> {
     let manifest = match Manifest::load(std::path::Path::new(manifest_path)) {
         Ok(m) => m,
@@ -69,9 +202,10 @@ pub async fn execute_merge_run(
     );
 
     let runner = MergeRunner::new(git, repo_root);
-    let opts = MergeOpts::new(target, strategy, false);
+    let opts = MergeOpts::new(target, strategy, verbose);
+    let handler = InteractiveConflictHandler { verbose };
 
-    match runner.run(&manifest, opts, &NoopConflictHandler).await {
+    match runner.run(&manifest, opts, &handler).await {
         Ok(report) => {
             // Progress summary to stderr
             for (i, result) in report.sessions_merged.iter().enumerate() {
@@ -106,6 +240,22 @@ pub async fn execute_merge_run(
                     "Skipped {} session(s): {}",
                     report.sessions_skipped.len(),
                     report.sessions_skipped.join(", ")
+                );
+            }
+
+            if report.has_resolved() {
+                eprintln!(
+                    "Resolved {} session(s): {}",
+                    report.sessions_resolved.len(),
+                    report.sessions_resolved.join(", ")
+                );
+            }
+
+            if report.has_conflict_skipped() {
+                eprintln!(
+                    "Skipped (conflict) {} session(s): {}",
+                    report.sessions_conflict_skipped.len(),
+                    report.sessions_conflict_skipped.join(", ")
                 );
             }
 
