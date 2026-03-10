@@ -214,6 +214,102 @@ impl GitOps for GitCli {
                 message: format!("failed to parse count: {e}"),
             })
     }
+
+    async fn merge_base(&self, ref_a: &str, ref_b: &str) -> Result<String> {
+        self.run(&["merge-base", ref_a, ref_b]).await
+    }
+
+    async fn branch_create(&self, branch_name: &str, start_point: &str) -> Result<()> {
+        self.run(&["branch", branch_name, start_point]).await?;
+        Ok(())
+    }
+
+    async fn merge_squash(
+        &self,
+        work_dir: &Path,
+        source_ref: &str,
+        session_name: &str,
+    ) -> Result<()> {
+        let output = Command::new(&self.git_binary)
+            .args(["merge", "--squash", source_ref])
+            .current_dir(work_dir)
+            .output()
+            .await
+            .map_err(|e| SmeltError::io("running git merge --squash", work_dir, e))?;
+
+        if output.status.success() {
+            return Ok(());
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // git merge --squash writes CONFLICT messages to stdout (not stderr)
+        if stdout.contains("CONFLICT") || stderr.contains("CONFLICT") {
+            let files = self.unmerged_files(work_dir).await?;
+            return Err(SmeltError::MergeConflict {
+                session: session_name.to_string(),
+                files,
+            });
+        }
+
+        let exit_code = output.status.code().unwrap_or(-1);
+        let combined = if stderr.is_empty() {
+            stdout.trim().to_string()
+        } else {
+            stderr.trim().to_string()
+        };
+        Err(SmeltError::GitExecution {
+            operation: format!("merge --squash {source_ref}"),
+            message: format!("exit code {exit_code}: {combined}"),
+        })
+    }
+
+    async fn worktree_add_existing(&self, path: &Path, branch_name: &str) -> Result<()> {
+        let path_str = path.to_string_lossy();
+        self.run(&["worktree", "add", &path_str, branch_name])
+            .await?;
+        Ok(())
+    }
+
+    async fn unmerged_files(&self, work_dir: &Path) -> Result<Vec<String>> {
+        let output = self
+            .run_in(work_dir, &["diff", "--name-only", "--diff-filter=U"])
+            .await?;
+        if output.is_empty() {
+            return Ok(Vec::new());
+        }
+        Ok(output.lines().map(|l| l.to_string()).collect())
+    }
+
+    async fn reset_hard(&self, work_dir: &Path, target_ref: &str) -> Result<()> {
+        self.run_in(work_dir, &["reset", "--hard", target_ref])
+            .await?;
+        Ok(())
+    }
+
+    async fn rev_parse(&self, rev: &str) -> Result<String> {
+        self.run(&["rev-parse", rev]).await
+    }
+
+    async fn diff_numstat(&self, from_ref: &str, to_ref: &str) -> Result<Vec<(usize, usize, String)>> {
+        let output = self.run(&["diff", "--numstat", from_ref, to_ref]).await?;
+        if output.is_empty() {
+            return Ok(Vec::new());
+        }
+        Ok(output
+            .lines()
+            .filter_map(|line| {
+                let parts: Vec<&str> = line.splitn(3, '\t').collect();
+                if parts.len() == 3 {
+                    let ins = parts[0].parse().unwrap_or(0);
+                    let del = parts[1].parse().unwrap_or(0);
+                    Some((ins, del, parts[2].to_string()))
+                } else {
+                    None
+                }
+            })
+            .collect())
+    }
 }
 
 #[cfg(test)]
@@ -661,5 +757,362 @@ mod tests {
                 .expect("not merged"),
             "unmerged branch should not be detected as merged"
         );
+    }
+
+    #[tokio::test]
+    async fn test_merge_base() {
+        let (tmp, cli) = setup_test_repo();
+        let git = which::which("git").expect("git on PATH");
+        let default_branch = cli.current_branch().await.expect("current_branch");
+
+        // Record the common ancestor hash
+        let base_hash = cli.rev_parse("HEAD").await.expect("rev_parse HEAD");
+
+        // Create branch-a with a commit
+        std::process::Command::new(&git)
+            .args(["checkout", "-b", "branch-a"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("checkout branch-a");
+        std::fs::write(tmp.path().join("a.txt"), "a\n").unwrap();
+        std::process::Command::new(&git)
+            .args(["add", "a.txt"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git add");
+        std::process::Command::new(&git)
+            .args(["commit", "-m", "commit a"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git commit");
+
+        // Create branch-b from the same base
+        std::process::Command::new(&git)
+            .args(["checkout", &default_branch])
+            .current_dir(tmp.path())
+            .output()
+            .expect("checkout default");
+        std::process::Command::new(&git)
+            .args(["checkout", "-b", "branch-b"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("checkout branch-b");
+        std::fs::write(tmp.path().join("b.txt"), "b\n").unwrap();
+        std::process::Command::new(&git)
+            .args(["add", "b.txt"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git add");
+        std::process::Command::new(&git)
+            .args(["commit", "-m", "commit b"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git commit");
+
+        // Go back to default
+        std::process::Command::new(&git)
+            .args(["checkout", &default_branch])
+            .current_dir(tmp.path())
+            .output()
+            .expect("checkout default");
+
+        let merge_base = cli.merge_base("branch-a", "branch-b").await.expect("merge_base");
+        assert_eq!(merge_base, base_hash, "merge-base should be the common ancestor");
+    }
+
+    #[tokio::test]
+    async fn test_branch_create() {
+        let (_tmp, cli) = setup_test_repo();
+
+        cli.branch_create("new-branch", "HEAD").await.expect("branch_create");
+        assert!(
+            cli.branch_exists("new-branch").await.expect("branch_exists"),
+            "newly created branch should exist"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_merge_squash_clean() {
+        let (tmp, cli) = setup_test_repo();
+        let git = which::which("git").expect("git on PATH");
+        let default_branch = cli.current_branch().await.expect("current_branch");
+
+        // Create a feature branch with a commit
+        std::process::Command::new(&git)
+            .args(["checkout", "-b", "feature-squash"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("checkout feature");
+        std::fs::write(tmp.path().join("feature.txt"), "feature content\n").unwrap();
+        std::process::Command::new(&git)
+            .args(["add", "feature.txt"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git add");
+        std::process::Command::new(&git)
+            .args(["commit", "-m", "feature commit"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git commit");
+
+        // Go back to default branch
+        std::process::Command::new(&git)
+            .args(["checkout", &default_branch])
+            .current_dir(tmp.path())
+            .output()
+            .expect("checkout default");
+
+        // Create a target branch and worktree for the merge
+        cli.branch_create("merge-target", "HEAD").await.expect("branch_create");
+        let wt_path = tmp.path().parent().unwrap().join("smelt-test-squash-clean");
+        cli.worktree_add_existing(&wt_path, "merge-target")
+            .await
+            .expect("worktree_add_existing");
+
+        // Squash merge
+        cli.merge_squash(&wt_path, "feature-squash", "test-session")
+            .await
+            .expect("merge_squash should succeed");
+
+        // Changes are staged but not committed — commit them
+        let hash = cli
+            .commit(&wt_path, "squash merge commit")
+            .await
+            .expect("commit after squash");
+        assert!(
+            hash.len() >= 7 && hash.chars().all(|c| c.is_ascii_hexdigit()),
+            "expected valid hash, got: {hash}"
+        );
+
+        // Verify the merge-target branch has the new commit
+        let count = cli
+            .rev_list_count("merge-target", &default_branch)
+            .await
+            .expect("rev_list_count");
+        assert_eq!(count, 1, "merge-target should be 1 commit ahead after squash merge");
+
+        // Cleanup
+        cli.worktree_remove(&wt_path, false).await.expect("worktree_remove");
+        let _ = std::fs::remove_dir_all(&wt_path);
+    }
+
+    #[tokio::test]
+    async fn test_merge_squash_conflict() {
+        let (tmp, cli) = setup_test_repo();
+        let git = which::which("git").expect("git on PATH");
+        let default_branch = cli.current_branch().await.expect("current_branch");
+
+        // Create branch-x that modifies README.md
+        std::process::Command::new(&git)
+            .args(["checkout", "-b", "branch-x"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("checkout branch-x");
+        std::fs::write(tmp.path().join("README.md"), "branch-x content\n").unwrap();
+        std::process::Command::new(&git)
+            .args(["add", "README.md"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git add");
+        std::process::Command::new(&git)
+            .args(["commit", "-m", "branch-x changes"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git commit");
+
+        // Go back to default and create branch-y that also modifies README.md differently
+        std::process::Command::new(&git)
+            .args(["checkout", &default_branch])
+            .current_dir(tmp.path())
+            .output()
+            .expect("checkout default");
+        std::process::Command::new(&git)
+            .args(["checkout", "-b", "branch-y"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("checkout branch-y");
+        std::fs::write(tmp.path().join("README.md"), "branch-y content\n").unwrap();
+        std::process::Command::new(&git)
+            .args(["add", "README.md"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git add");
+        std::process::Command::new(&git)
+            .args(["commit", "-m", "branch-y changes"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git commit");
+
+        // Go back to default
+        std::process::Command::new(&git)
+            .args(["checkout", &default_branch])
+            .current_dir(tmp.path())
+            .output()
+            .expect("checkout default");
+
+        // Create target branch at branch-x HEAD (simulating first session already merged)
+        // Then try to squash branch-y into it — conflict on README.md
+        cli.branch_create("conflict-target", "branch-x").await.expect("branch_create");
+        let wt_path = tmp.path().parent().unwrap().join(format!(
+            "smelt-test-squash-conflict-{}",
+            std::process::id()
+        ));
+        cli.worktree_add_existing(&wt_path, "conflict-target")
+            .await
+            .expect("worktree_add_existing");
+
+        let result = cli.merge_squash(&wt_path, "branch-y", "session-y").await;
+        assert!(result.is_err(), "merge_squash should fail with conflict");
+
+        let err = result.unwrap_err();
+        match &err {
+            SmeltError::MergeConflict { session, files } => {
+                assert_eq!(session, "session-y");
+                assert!(
+                    files.contains(&"README.md".to_string()),
+                    "conflicting files should contain README.md, got: {files:?}"
+                );
+            }
+            other => panic!("expected MergeConflict, got: {other:?}"),
+        }
+
+        // Cleanup: reset the worktree before removing
+        cli.reset_hard(&wt_path, "HEAD").await.expect("reset_hard");
+        cli.worktree_remove(&wt_path, true).await.expect("worktree_remove");
+        let _ = std::fs::remove_dir_all(&wt_path);
+    }
+
+    #[tokio::test]
+    async fn test_reset_hard() {
+        let (tmp, cli) = setup_test_repo();
+        let wt_path = tmp.path().parent().unwrap().join("smelt-test-reset-hard");
+
+        cli.worktree_add(&wt_path, "reset-branch", "HEAD")
+            .await
+            .expect("worktree_add");
+
+        // Make the worktree dirty
+        std::fs::write(wt_path.join("dirty.txt"), "dirty\n").unwrap();
+        let git = which::which("git").expect("git on PATH");
+        std::process::Command::new(&git)
+            .args(["add", "dirty.txt"])
+            .current_dir(&wt_path)
+            .output()
+            .expect("git add");
+
+        assert!(
+            cli.worktree_is_dirty(&wt_path).await.expect("is_dirty"),
+            "worktree should be dirty"
+        );
+
+        // Reset hard
+        cli.reset_hard(&wt_path, "HEAD").await.expect("reset_hard");
+
+        assert!(
+            !cli.worktree_is_dirty(&wt_path).await.expect("is_dirty after reset"),
+            "worktree should be clean after reset --hard"
+        );
+
+        // Cleanup
+        cli.worktree_remove(&wt_path, false).await.expect("worktree_remove");
+        let _ = std::fs::remove_dir_all(&wt_path);
+    }
+
+    #[tokio::test]
+    async fn test_rev_parse() {
+        let (_tmp, cli) = setup_test_repo();
+        let hash = cli.rev_parse("HEAD").await.expect("rev_parse");
+
+        assert_eq!(hash.len(), 40, "full hash should be 40 chars, got: {hash}");
+        assert!(
+            hash.chars().all(|c| c.is_ascii_hexdigit()),
+            "hash should be hex, got: {hash}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_diff_numstat() {
+        let (tmp, cli) = setup_test_repo();
+        let git = which::which("git").expect("git on PATH");
+        let default_branch = cli.current_branch().await.expect("current_branch");
+
+        // Create a branch with changes
+        std::process::Command::new(&git)
+            .args(["checkout", "-b", "numstat-branch"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("checkout");
+        std::fs::write(tmp.path().join("new_file.txt"), "line1\nline2\nline3\n").unwrap();
+        std::process::Command::new(&git)
+            .args(["add", "new_file.txt"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git add");
+        std::process::Command::new(&git)
+            .args(["commit", "-m", "add new file"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git commit");
+
+        // Go back to default
+        std::process::Command::new(&git)
+            .args(["checkout", &default_branch])
+            .current_dir(tmp.path())
+            .output()
+            .expect("checkout default");
+
+        let stats = cli
+            .diff_numstat(&default_branch, "numstat-branch")
+            .await
+            .expect("diff_numstat");
+
+        assert!(!stats.is_empty(), "should have diff stats");
+        let new_file_stat = stats.iter().find(|(_, _, name)| name == "new_file.txt");
+        assert!(new_file_stat.is_some(), "should find new_file.txt in stats");
+        let (ins, del, _) = new_file_stat.unwrap();
+        assert_eq!(*ins, 3, "should have 3 insertions");
+        assert_eq!(*del, 0, "should have 0 deletions");
+    }
+
+    #[tokio::test]
+    async fn test_unmerged_files_empty_when_clean() {
+        let (tmp, cli) = setup_test_repo();
+
+        let files = cli.unmerged_files(tmp.path()).await.expect("unmerged_files");
+        assert!(files.is_empty(), "clean worktree should have no unmerged files");
+    }
+
+    #[tokio::test]
+    async fn test_worktree_add_existing() {
+        let (tmp, cli) = setup_test_repo();
+        let git = which::which("git").expect("git on PATH");
+
+        // Create a branch (not checked out)
+        std::process::Command::new(&git)
+            .args(["branch", "existing-branch"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("create branch");
+
+        let wt_path = tmp.path().parent().unwrap().join("smelt-test-wt-existing");
+        cli.worktree_add_existing(&wt_path, "existing-branch")
+            .await
+            .expect("worktree_add_existing");
+
+        // Verify worktree exists
+        assert!(wt_path.exists(), "worktree directory should exist");
+
+        // Verify it's on the correct branch
+        let output = std::process::Command::new(&git)
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .current_dir(&wt_path)
+            .output()
+            .expect("rev-parse in worktree");
+        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        assert_eq!(branch, "existing-branch", "worktree should be on existing-branch");
+
+        // Cleanup
+        cli.worktree_remove(&wt_path, false).await.expect("worktree_remove");
+        let _ = std::fs::remove_dir_all(&wt_path);
     }
 }
