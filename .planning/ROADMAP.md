@@ -89,6 +89,14 @@ Smelt is a multi-agent orchestration layer that coordinates AI coding sessions i
 3. Each merge step is atomic — if an intermediate merge fails, the target branch is not left in a corrupted state
 4. Merge operations are serialized (no concurrent merges that could corrupt the index)
 
+**Plans:**
+
+| Plan | Wave | Title | Tasks |
+|------|------|-------|-------|
+| 04-01 | 1 | Foundation: error variants + GitOps merge methods | Merge error variants (MergeConflict, MergeTargetExists, NoCompletedSessions), 7 new GitOps methods (merge_base, merge_squash, branch_create, diff_numstat, unmerged_files, reset_hard, rev_parse) + GitCli implementations |
+| 04-02 | 2 | Core: MergeRunner + merge pipeline | MergeRunner struct, merge types (MergeReport, DiffStat), sequential squash merge loop, rollback on conflict, cleanup on success, session filtering, worktree_add_existing |
+| 04-03 | 3 | CLI + Integration: smelt merge command + e2e tests | CLI merge command with progress/summary output, --target flag, integration tests for clean merge, conflict rollback, edge cases |
+
 ### Phase 5: Merge Order Intelligence
 
 **Goal:** Implement deterministic merge ordering that minimizes expected conflicts. The default strategy orders by session completion time; an alternative strategy analyzes file overlap between branches and merges least-overlapping pairs first.
