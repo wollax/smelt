@@ -207,7 +207,7 @@ Smelt is a multi-agent orchestration layer that coordinates AI coding sessions i
 | 3 | Session Manifest & Scripted Sessions | SESS-02, SESS-04 | Complete |
 | 4 | Sequential Merge | MERGE-01 | Complete |
 | 5 | Merge Order Intelligence | MERGE-04 | Complete |
-| 6 | Human Fallback Resolution | MERGE-03 | Pending |
+| 6 | Human Fallback Resolution | MERGE-03 | Complete |
 | 7 | AI Conflict Resolution | MERGE-02 | Pending |
 | 8 | Orchestration Plan & Task Graph | ORCH-04 | Pending |
 | 9 | Session Summary & Scope Isolation | ORCH-02, ORCH-03 | Pending |

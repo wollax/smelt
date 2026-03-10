@@ -13,7 +13,7 @@
 
 - [x] **MERGE-01**: User can merge outputs from multiple agent worktrees into a single target branch via sequential merge
 - [ ] **MERGE-02**: User gets AI-assisted conflict resolution when merge conflicts occur
-- [ ] **MERGE-03**: User can escalate to manual resolution when AI conflict resolution fails (human fallback)
+- [x] **MERGE-03**: User can escalate to manual resolution when AI conflict resolution fails (human fallback)
 - [x] **MERGE-04**: System determines optimal merge order to minimize conflicts
 
 ### Orchestration
@@ -51,7 +51,7 @@
 | SESS-04 | Phase 3: Session Manifest & Scripted Sessions | Complete |
 | MERGE-01 | Phase 4: Sequential Merge | Complete |
 | MERGE-02 | Phase 7: AI Conflict Resolution | Pending |
-| MERGE-03 | Phase 6: Human Fallback Resolution | Pending |
+| MERGE-03 | Phase 6: Human Fallback Resolution | Complete |
 | MERGE-04 | Phase 5: Merge Order Intelligence | Complete |
 | ORCH-01 | Phase 1: Project Bootstrap & Git Operations Layer | Complete |
 | ORCH-02 | Phase 9: Session Summary & Scope Isolation | Pending |
