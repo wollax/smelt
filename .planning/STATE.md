@@ -130,6 +130,7 @@ Resume file: None
 - dialoguer::Select with spawn_blocking for async compatibility in conflict handler
 - Small conflicts (<20 total lines) show inline markers with console::style coloring; larger conflicts show truncated view
 - --verbose on merge run dumps full conflict file contents in worktree
+- PR review: removed dead resume detection code, moved verbose from MergeOpts to CLI handler, ConflictScan.has_markers is now a method, resolution is no longer Option, sessions_merged excludes skipped, rollback errors are logged
 
 ### Blockers
 

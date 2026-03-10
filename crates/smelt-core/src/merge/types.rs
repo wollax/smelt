@@ -33,7 +33,10 @@ pub enum ResolutionMethod {
 #[non_exhaustive]
 #[serde(rename_all = "kebab-case")]
 pub enum MergeOrderStrategy {
-    /// Order sessions by manifest position (default — preserves Phase 4 behavior).
+    /// Order sessions by their position in the manifest (default).
+    ///
+    /// Named `CompletionTime` for forward-compatibility with planned timestamp-based
+    /// ordering; currently equivalent to manifest order.
     #[default]
     CompletionTime,
     /// Order sessions by file overlap — merge least-overlapping first.
@@ -71,21 +74,17 @@ pub struct MergeOpts {
     pub target_branch: Option<String>,
     /// Override the merge ordering strategy.
     pub strategy: Option<MergeOrderStrategy>,
-    /// Enable verbose output during merge operations.
-    pub verbose: bool,
 }
 
 impl MergeOpts {
-    /// Create merge options with both target branch and strategy overrides.
+    /// Create merge options with target branch and strategy overrides.
     pub fn new(
         target_branch: Option<String>,
         strategy: Option<MergeOrderStrategy>,
-        verbose: bool,
     ) -> Self {
         Self {
             target_branch,
             strategy,
-            verbose,
         }
     }
 
@@ -94,7 +93,6 @@ impl MergeOpts {
         Self {
             target_branch: Some(target),
             strategy: None,
-            verbose: false,
         }
     }
 
@@ -103,7 +101,6 @@ impl MergeOpts {
         Self {
             target_branch: None,
             strategy: Some(strategy),
-            verbose: false,
         }
     }
 }
@@ -125,8 +122,8 @@ pub struct MergeSessionResult {
     pub files_changed: usize,
     pub insertions: usize,
     pub deletions: usize,
-    /// How this session's merge was resolved (clean, manual, or skipped).
-    pub resolution: Option<ResolutionMethod>,
+    /// How this session's merge was resolved.
+    pub resolution: ResolutionMethod,
 }
 
 /// Overall merge report.
@@ -148,7 +145,9 @@ pub struct MergeReport {
 }
 
 impl MergeReport {
-    /// Returns `true` if any sessions were skipped during the merge.
+    /// Returns `true` if any sessions were excluded before the merge
+    /// (e.g. failed or orphaned sessions). For conflict-triggered skips,
+    /// see [`has_conflict_skipped`](Self::has_conflict_skipped).
     pub fn has_skipped(&self) -> bool {
         !self.sessions_skipped.is_empty()
     }

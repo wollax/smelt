@@ -78,7 +78,7 @@ impl ConflictHandler for InteractiveConflictHandler {
             eprintln!("  {file}");
         }
 
-        if scan.has_markers {
+        if scan.has_markers() {
             for hunk in &scan.hunks {
                 eprintln!("  lines {}..{}", hunk.start_line, hunk.end_line);
             }
@@ -90,7 +90,7 @@ impl ConflictHandler for InteractiveConflictHandler {
                     if let Ok(content) = std::fs::read_to_string(&path) {
                         let file_scan =
                             smelt_core::merge::scan_conflict_markers(&content);
-                        if file_scan.has_markers {
+                        if file_scan.has_markers() {
                             eprintln!("\n  --- {file} ---");
                             let lines: Vec<&str> = content.lines().collect();
                             for hunk in &file_scan.hunks {
@@ -145,7 +145,8 @@ impl ConflictHandler for InteractiveConflictHandler {
 
         eprintln!("\nResolve conflicts in the files above, then choose an action:");
 
-        let action = tokio::task::spawn_blocking(|| {
+        let session_owned = session_name.to_string();
+        let action = tokio::task::spawn_blocking(move || {
             let items = vec![
                 "Resolve (conflicts fixed, continue)",
                 "Skip (undo this session, continue others)",
@@ -157,7 +158,7 @@ impl ConflictHandler for InteractiveConflictHandler {
                 .default(0)
                 .interact_on(&console::Term::stderr())
                 .map_err(|e| SmeltError::SessionError {
-                    session: String::new(),
+                    session: session_owned.clone(),
                     message: format!("failed to read user input: {e}"),
                 })?;
             Ok(match selection {
@@ -202,7 +203,7 @@ pub async fn execute_merge_run(
     );
 
     let runner = MergeRunner::new(git, repo_root);
-    let opts = MergeOpts::new(target, strategy, verbose);
+    let opts = MergeOpts::new(target, strategy);
     let handler = InteractiveConflictHandler { verbose };
 
     match runner.run(&manifest, opts, &handler).await {
@@ -327,7 +328,7 @@ pub async fn execute_merge_plan(
     };
 
     let runner = MergeRunner::new(git, repo_root);
-    let opts = MergeOpts::new(target, strategy, false);
+    let opts = MergeOpts::new(target, strategy);
 
     match runner.plan(&manifest, opts).await {
         Ok(plan) => {

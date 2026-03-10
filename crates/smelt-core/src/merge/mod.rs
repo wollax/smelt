@@ -44,8 +44,8 @@ pub trait ConflictHandler: Send + Sync {
 
 /// A conflict handler that always propagates the conflict as an error.
 ///
-/// This preserves Phase 4 behavior — conflicts are fatal. Used by default
-/// in tests and non-interactive contexts.
+/// This preserves Phase 4 behavior — conflicts are fatal. Used in tests
+/// to verify conflict detection without interactive prompts.
 pub struct NoopConflictHandler;
 
 impl ConflictHandler for NoopConflictHandler {
@@ -192,7 +192,7 @@ impl<G: GitOps + Clone> MergeRunner<G> {
 
         // Phase D + E: Sequential merge loop + cleanup
         let result = self
-            .merge_sessions(&ordered, &temp_path, &target_branch, handler, &base_commit)
+            .merge_sessions(&ordered, &temp_path, &target_branch, handler)
             .await;
 
         match result {
@@ -224,20 +224,26 @@ impl<G: GitOps + Clone> MergeRunner<G> {
 
                 let sessions_conflict_skipped: Vec<String> = session_results
                     .iter()
-                    .filter(|r| r.resolution == Some(ResolutionMethod::Skipped))
+                    .filter(|r| r.resolution == ResolutionMethod::Skipped)
                     .map(|r| r.session_name.clone())
                     .collect();
 
                 let sessions_resolved: Vec<String> = session_results
                     .iter()
-                    .filter(|r| r.resolution == Some(ResolutionMethod::Manual))
+                    .filter(|r| r.resolution == ResolutionMethod::Manual)
                     .map(|r| r.session_name.clone())
+                    .collect();
+
+                // Only include actually merged sessions (not conflict-skipped)
+                let sessions_merged: Vec<MergeSessionResult> = session_results
+                    .into_iter()
+                    .filter(|r| r.resolution != ResolutionMethod::Skipped)
                     .collect();
 
                 Ok(MergeReport {
                     target_branch,
                     base_commit,
-                    sessions_merged: session_results,
+                    sessions_merged,
                     sessions_skipped: skipped,
                     total_files_changed,
                     total_insertions,
@@ -249,14 +255,22 @@ impl<G: GitOps + Clone> MergeRunner<G> {
             }
             Err(e) => {
                 // Rollback: clean up temp worktree + target branch
-                let _ = self.git.reset_hard(&temp_path, "HEAD").await;
-                let _ = self.git.worktree_remove(&temp_path, true).await;
-                // Filesystem fallback if worktree_remove failed to clean up
-                if temp_path.exists() {
-                    let _ = std::fs::remove_dir_all(&temp_path);
+                if let Err(re) = self.git.reset_hard(&temp_path, "HEAD").await {
+                    warn!("rollback: failed to reset worktree: {re}");
                 }
-                let _ = self.git.worktree_prune().await;
-                let _ = self.git.branch_delete(&target_branch, true).await;
+                if let Err(re) = self.git.worktree_remove(&temp_path, true).await {
+                    warn!("rollback: failed to remove worktree: {re}");
+                }
+                // Filesystem fallback if worktree_remove failed to clean up
+                if temp_path.exists() && std::fs::remove_dir_all(&temp_path).is_err() {
+                    warn!("rollback: failed to remove worktree directory at {}", temp_path.display());
+                }
+                if let Err(re) = self.git.worktree_prune().await {
+                    warn!("rollback: failed to prune worktrees: {re}");
+                }
+                if let Err(re) = self.git.branch_delete(&target_branch, true).await {
+                    warn!("rollback: failed to delete target branch '{}': {re}", target_branch);
+                }
                 Err(e)
             }
         }
@@ -360,26 +374,11 @@ impl<G: GitOps + Clone> MergeRunner<G> {
         temp_path: &Path,
         target_branch: &str,
         handler: &H,
-        base_commit: &str,
     ) -> Result<Vec<MergeSessionResult>> {
         let total = sessions.len();
         let mut results = Vec::with_capacity(total);
 
         for (i, session) in sessions.iter().enumerate() {
-            // Resume detection: check if this session was already merged
-            let range = format!("{base_commit}..{target_branch}");
-            let prefix = format!("merge({}):", session.session_name);
-            let subjects = self.git.log_subjects(&range).await.unwrap_or_default();
-            if subjects.iter().any(|s| s.starts_with(&prefix)) {
-                info!(
-                    "[{}/{}] Session '{}' already merged, skipping",
-                    i + 1,
-                    total,
-                    session.session_name
-                );
-                continue;
-            }
-
             info!(
                 "[{}/{}] Merging session '{}'...",
                 i + 1,
@@ -401,7 +400,7 @@ impl<G: GitOps + Clone> MergeRunner<G> {
                         session.task_description.as_deref(),
                         target_branch,
                         &session.branch_name,
-                        None,
+                        false,
                     );
                     let result = self
                         .commit_and_stat(temp_path, &session.session_name, &commit_msg, ResolutionMethod::Clean)
@@ -431,7 +430,7 @@ impl<G: GitOps + Clone> MergeRunner<G> {
                             ConflictAction::Resolved => {
                                 // Re-scan to validate resolution
                                 scan = conflict::scan_files_for_markers(temp_path, &conflict_files);
-                                if scan.has_markers {
+                                if scan.has_markers() {
                                     // Still has markers — re-prompt
                                     continue;
                                 }
@@ -442,7 +441,7 @@ impl<G: GitOps + Clone> MergeRunner<G> {
                                     session.task_description.as_deref(),
                                     target_branch,
                                     &session.branch_name,
-                                    Some(ResolutionMethod::Manual),
+                                    true,
                                 );
                                 let result = self
                                     .commit_and_stat(
@@ -476,7 +475,7 @@ impl<G: GitOps + Clone> MergeRunner<G> {
                                     files_changed: 0,
                                     insertions: 0,
                                     deletions: 0,
-                                    resolution: Some(ResolutionMethod::Skipped),
+                                    resolution: ResolutionMethod::Skipped,
                                 });
                                 break;
                             }
@@ -542,7 +541,7 @@ impl<G: GitOps + Clone> MergeRunner<G> {
             files_changed,
             insertions,
             deletions,
-            resolution: Some(resolution),
+            resolution,
         })
     }
 }
@@ -553,11 +552,12 @@ fn format_commit_message(
     task: Option<&str>,
     target_branch: &str,
     session_branch: &str,
-    resolution: Option<ResolutionMethod>,
+    manually_resolved: bool,
 ) -> String {
-    let suffix = match resolution {
-        Some(ResolutionMethod::Manual) => " [resolved: manual]",
-        _ => "",
+    let suffix = if manually_resolved {
+        " [resolved: manual]"
+    } else {
+        ""
     };
 
     let subject = match task {
@@ -1085,13 +1085,9 @@ mod tests {
             .expect("merge should succeed with skip handler");
 
         // First session merges cleanly, second conflicts and is skipped
-        assert_eq!(report.sessions_merged.len(), 2);
+        assert_eq!(report.sessions_merged.len(), 1);
         assert_eq!(report.sessions_merged[0].session_name, "skip-a");
-        assert_eq!(report.sessions_merged[0].resolution, Some(ResolutionMethod::Clean));
-        assert_eq!(report.sessions_merged[1].session_name, "skip-b");
-        assert_eq!(report.sessions_merged[1].resolution, Some(ResolutionMethod::Skipped));
-        assert_eq!(report.sessions_merged[1].commit_hash, "");
-        assert_eq!(report.sessions_merged[1].files_changed, 0);
+        assert_eq!(report.sessions_merged[0].resolution, ResolutionMethod::Clean);
 
         // Report fields
         assert_eq!(report.sessions_conflict_skipped, vec!["skip-b"]);
@@ -1208,12 +1204,12 @@ mod tests {
         assert_eq!(report.sessions_merged[0].session_name, "resolve-a");
         assert_eq!(
             report.sessions_merged[0].resolution,
-            Some(ResolutionMethod::Clean)
+            ResolutionMethod::Clean
         );
         assert_eq!(report.sessions_merged[1].session_name, "resolve-b");
         assert_eq!(
             report.sessions_merged[1].resolution,
-            Some(ResolutionMethod::Manual)
+            ResolutionMethod::Manual
         );
 
         // Report fields
@@ -1336,22 +1332,17 @@ mod tests {
             .await
             .expect("merge should succeed with skip handler");
 
-        // A and C should be merged, B should be skipped
-        assert_eq!(report.sessions_merged.len(), 3); // all appear in results
+        // A and C should be merged, B should be conflict-skipped
+        assert_eq!(report.sessions_merged.len(), 2); // only successfully merged
         assert_eq!(report.sessions_merged[0].session_name, "skip-clean-a");
         assert_eq!(
             report.sessions_merged[0].resolution,
-            Some(ResolutionMethod::Clean)
+            ResolutionMethod::Clean
         );
-        assert_eq!(report.sessions_merged[1].session_name, "skip-conflict-b");
+        assert_eq!(report.sessions_merged[1].session_name, "skip-clean-c");
         assert_eq!(
             report.sessions_merged[1].resolution,
-            Some(ResolutionMethod::Skipped)
-        );
-        assert_eq!(report.sessions_merged[2].session_name, "skip-clean-c");
-        assert_eq!(
-            report.sessions_merged[2].resolution,
-            Some(ResolutionMethod::Clean)
+            ResolutionMethod::Clean
         );
 
         // Report fields

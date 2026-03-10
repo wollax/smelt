@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+use tracing::warn;
+
 /// A contiguous region of conflict markers in a file.
 #[derive(Debug, Clone)]
 pub struct ConflictHunk {
@@ -14,12 +16,17 @@ pub struct ConflictHunk {
 /// Result of scanning a file (or set of files) for conflict markers.
 #[derive(Debug, Clone)]
 pub struct ConflictScan {
-    /// Whether any conflict markers were found.
-    pub has_markers: bool,
     /// Detected conflict hunks (regions between `<<<<<<<` and `>>>>>>>`).
     pub hunks: Vec<ConflictHunk>,
     /// Total number of lines within conflict regions.
     pub total_conflict_lines: usize,
+}
+
+impl ConflictScan {
+    /// Whether any conflict markers were found.
+    pub fn has_markers(&self) -> bool {
+        !self.hunks.is_empty()
+    }
 }
 
 /// Scan a string for git conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`).
@@ -58,7 +65,6 @@ pub fn scan_conflict_markers(content: &str) -> ConflictScan {
     }
 
     ConflictScan {
-        has_markers: !hunks.is_empty(),
         hunks,
         total_conflict_lines,
     }
@@ -76,7 +82,8 @@ pub fn scan_files_for_markers(work_dir: &Path, files: &[String]) -> ConflictScan
     for file in files {
         let path = work_dir.join(file);
         let Ok(content) = std::fs::read_to_string(&path) else {
-            continue; // skip binary / unreadable files
+            warn!("skipping conflict scan for '{}': not readable as UTF-8", file);
+            continue;
         };
         let scan = scan_conflict_markers(&content);
         total_lines += scan.total_conflict_lines;
@@ -84,7 +91,6 @@ pub fn scan_files_for_markers(work_dir: &Path, files: &[String]) -> ConflictScan
     }
 
     ConflictScan {
-        has_markers: !all_hunks.is_empty(),
         hunks: all_hunks,
         total_conflict_lines: total_lines,
     }
@@ -97,7 +103,7 @@ mod tests {
     #[test]
     fn no_markers() {
         let scan = scan_conflict_markers("hello\nworld\n");
-        assert!(!scan.has_markers);
+        assert!(!scan.has_markers());
         assert!(scan.hunks.is_empty());
         assert_eq!(scan.total_conflict_lines, 0);
     }
@@ -114,7 +120,7 @@ their change
 line 7
 ";
         let scan = scan_conflict_markers(content);
-        assert!(scan.has_markers);
+        assert!(scan.has_markers());
         assert_eq!(scan.hunks.len(), 1);
         assert_eq!(scan.hunks[0].start_line, 2);
         assert_eq!(scan.hunks[0].end_line, 6);
@@ -137,7 +143,7 @@ theirs-2
 >>>>>>> branch
 ";
         let scan = scan_conflict_markers(content);
-        assert!(scan.has_markers);
+        assert!(scan.has_markers());
         assert_eq!(scan.hunks.len(), 2);
         assert_eq!(scan.hunks[0].start_line, 1);
         assert_eq!(scan.hunks[0].end_line, 5);
@@ -155,7 +161,7 @@ ours
 theirs
 ";
         let scan = scan_conflict_markers(content);
-        assert!(!scan.has_markers);
+        assert!(!scan.has_markers());
         assert!(scan.hunks.is_empty());
     }
 
@@ -167,7 +173,7 @@ ours
 >>>>>>> branch
 ";
         let scan = scan_conflict_markers(content);
-        assert!(!scan.has_markers);
+        assert!(!scan.has_markers());
         assert!(scan.hunks.is_empty());
     }
 
@@ -184,7 +190,7 @@ theirs-2
 >>>>>>> branch
 ";
         let scan = scan_conflict_markers(content);
-        assert!(scan.has_markers);
+        assert!(scan.has_markers());
         assert_eq!(scan.hunks.len(), 1);
         // The second <<<<<<< at line 3 restarted the hunk.
         assert_eq!(scan.hunks[0].start_line, 3);
@@ -194,7 +200,7 @@ theirs-2
     #[test]
     fn empty_content() {
         let scan = scan_conflict_markers("");
-        assert!(!scan.has_markers);
+        assert!(!scan.has_markers());
         assert!(scan.hunks.is_empty());
         assert_eq!(scan.total_conflict_lines, 0);
     }
@@ -216,7 +222,7 @@ theirs-2
             dir.path(),
             &["a.txt".to_string(), "b.txt".to_string()],
         );
-        assert!(scan.has_markers);
+        assert!(scan.has_markers());
         assert_eq!(scan.hunks.len(), 1);
         assert_eq!(scan.total_conflict_lines, 5);
     }
@@ -228,7 +234,7 @@ theirs-2
             dir.path(),
             &["nonexistent.txt".to_string()],
         );
-        assert!(!scan.has_markers);
+        assert!(!scan.has_markers());
         assert!(scan.hunks.is_empty());
     }
 }
