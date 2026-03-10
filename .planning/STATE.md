@@ -3,16 +3,16 @@
 ## Current Position
 
 Phase: 6 of 10 — Human Fallback Resolution
-Plan: 1 of 3 complete
+Plan: 2 of 3 complete
 Status: In progress
 Progress: ███████░░░ 7/10
 
-Last activity: 2026-03-10 — Completed 06-01-PLAN.md (Foundation Types, Conflict Scanning & GitOps Extension)
+Last activity: 2026-03-10 — Completed 06-02-PLAN.md (Conflict Handler Trait & Merge Loop Refactor)
 
 ## Session Continuity
 
-Last session: 2026-03-10T16:46:00Z
-Stopped at: Completed 06-01-PLAN.md
+Last session: 2026-03-10T18:00:00Z
+Stopped at: Completed 06-02-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -21,8 +21,8 @@ Resume file: None
 |--------|-------|
 | Phases completed | 5 |
 | Phases remaining | 5 |
-| Plans completed (phase 6) | 1/3 |
-| Requirements covered | 5/12 |
+| Plans completed (phase 6) | 2/3 |
+| Requirements covered | 7/12 |
 | Blockers | 0 |
 | Technical debt items | 0 |
 
@@ -115,6 +115,17 @@ Resume file: None
 - scan_conflict_markers discards partial hunks on new `<<<<<<<` — prevents false positives
 - scan_files_for_markers silently skips unreadable files — binary/deleted files should not cause errors
 - GitOps::log_subjects(range) returns Vec<String> of commit subjects via git log --format=%s
+- ConflictHandler trait uses RPITIT with handle_conflict(&self, session_name, files, scan, work_dir) -> Result<ConflictAction>
+- NoopConflictHandler propagates MergeConflict error unchanged — preserves Phase 4 behavior
+- MergeRunner::run() is generic over H: ConflictHandler — handler passed by reference
+- merge_sessions() catches MergeConflict, scans markers, invokes handler in a loop
+- ConflictAction::Resolved re-scans for markers; re-prompts handler if markers remain
+- ConflictAction::Skip resets hard to HEAD, records ResolutionMethod::Skipped
+- ConflictAction::Abort returns SmeltError::MergeAborted which triggers rollback in run()
+- Resume detection: checks log_subjects for merge(<session>): prefix before attempting merge
+- format_commit_message appends [resolved: manual] suffix for manually resolved conflicts
+- commit_and_stat() helper extracted on MergeRunner to avoid duplication between clean and resolved paths
+- SmeltError::MergeAborted { session } variant added — 18 total variants
 
 ### Blockers
 
