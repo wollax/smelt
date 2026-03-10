@@ -9,5 +9,5 @@ pub mod worktree;
 pub use error::{Result, SmeltError};
 pub use git::{GitCli, GitOps, preflight};
 pub use init::init_project;
-pub use session::{Manifest, SessionResult};
+pub use session::{Manifest, SessionResult, SessionRunner};
 pub use worktree::{CreateWorktreeOpts, RemoveResult, WorktreeInfo, WorktreeManager};
