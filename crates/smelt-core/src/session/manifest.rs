@@ -6,6 +6,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, SmeltError};
+use crate::orchestrate::types::FailurePolicy;
 
 /// Top-level session manifest, parsed from a TOML file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,8 +29,8 @@ pub struct ManifestMeta {
     /// or sequentially in manifest order when false.
     #[serde(default = "default_parallel")]
     pub parallel_by_default: bool,
-    /// Failure policy: "skip-dependents" (default) or "abort".
-    pub on_failure: Option<String>,
+    /// Failure policy for orchestration — governs behavior when a session fails.
+    pub on_failure: Option<FailurePolicy>,
 }
 
 fn default_base_ref() -> String {
@@ -132,16 +133,6 @@ impl Manifest {
             return Err(SmeltError::ManifestParse(
                 "manifest must define at least one session".to_string(),
             ));
-        }
-
-        // Validate on_failure policy
-        if let Some(ref policy) = self.manifest.on_failure
-            && policy != "skip-dependents"
-            && policy != "abort"
-        {
-            return Err(SmeltError::ManifestParse(format!(
-                "invalid on_failure policy '{policy}' (expected: skip-dependents, abort)"
-            )));
         }
 
         let mut names = HashSet::new();
@@ -599,11 +590,14 @@ name = "s1"
 task = "Task"
 "#;
         let manifest = Manifest::parse(toml).expect("should parse");
-        assert_eq!(manifest.manifest.on_failure.as_deref(), Some("abort"));
+        assert_eq!(
+            manifest.manifest.on_failure,
+            Some(FailurePolicy::Abort)
+        );
     }
 
     #[test]
-    fn validate_rejects_unknown_on_failure() {
+    fn parse_rejects_unknown_on_failure() {
         let toml = r#"
 [manifest]
 name = "bad-policy"
@@ -614,9 +608,10 @@ name = "s1"
 task = "Task"
 "#;
         let err = Manifest::parse(toml).unwrap_err();
+        // Serde rejects unknown enum variants at parse time
         assert!(
-            err.to_string().contains("invalid on_failure policy 'retry'"),
-            "got: {err}"
+            err.to_string().contains("on_failure"),
+            "expected on_failure parse error, got: {err}"
         );
     }
 

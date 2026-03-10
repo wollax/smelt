@@ -56,7 +56,7 @@ impl<G: GitOps + Clone + Send + Sync + 'static> Orchestrator<G> {
 
         // Phase 0: Validate & build DAG
         let dag = build_dag(manifest)?;
-        let failure_policy = FailurePolicy::from(manifest.manifest.on_failure.as_deref());
+        let failure_policy = manifest.manifest.on_failure.unwrap_or_default();
 
         // Initialize run state
         let manifest_hash = compute_manifest_hash(manifest_content);
@@ -349,7 +349,9 @@ impl<G: GitOps + Clone + Send + Sync + 'static> Orchestrator<G> {
                     .sessions
                     .iter()
                     .find(|s| s.name == session_name)
-                    .expect("session must exist in manifest");
+                    .ok_or_else(|| SmeltError::Orchestration {
+                        message: format!("session '{session_name}' not found in manifest"),
+                    })?;
 
                 // Resolve worktree path from state file
                 let wt_state_file = smelt_dir
@@ -404,60 +406,89 @@ impl<G: GitOps + Clone + Send + Sync + 'static> Orchestrator<G> {
                 let child_cancel = cancel.child_token();
                 let log_path = state_manager.log_path(&run_state.run_id, &session_name);
 
+                // Clone name for panic-safety: the inner spawn catches panics
+                // via JoinError, and the outer closure still has the name.
+                let panic_name = name_clone.clone();
                 join_set.spawn(async move {
-                    let timer = tokio::time::Instant::now();
+                    // Spawn the session work as a nested task so that if it panics,
+                    // the JoinError is caught here while we still have `panic_name`
+                    // to identify the session. Without this, a panic loses the
+                    // session identity, causing it to leak in the in_flight set.
+                    let handle = tokio::task::spawn(async move {
+                        let timer = tokio::time::Instant::now();
 
-                    let result = if let Some(ref script_def) = script {
-                        let executor = ScriptExecutor::new(&git, worktree_path);
-                        tokio::select! {
-                            biased;
-                            _ = child_cancel.cancelled() => {
-                                Ok(SessionRunState::Cancelled)
-                            }
-                            res = executor.execute(&name_clone, script_def) => {
-                                match res {
-                                    Ok(session_result) => {
-                                        let duration = timer.elapsed().as_secs_f64();
-                                        match session_result.outcome {
-                                            SessionOutcome::Completed => {
-                                                Ok(SessionRunState::Completed { duration_secs: duration })
-                                            }
-                                            _ => {
-                                                Ok(SessionRunState::Failed {
-                                                    reason: session_result
-                                                        .failure_reason
-                                                        .unwrap_or_else(|| "unknown failure".to_string()),
-                                                })
+                        let result = if let Some(ref script_def) = script {
+                            let executor = ScriptExecutor::new(&git, worktree_path);
+                            tokio::select! {
+                                biased;
+                                _ = child_cancel.cancelled() => {
+                                    Ok(SessionRunState::Cancelled)
+                                }
+                                res = executor.execute(&name_clone, script_def) => {
+                                    match res {
+                                        Ok(session_result) => {
+                                            let duration = timer.elapsed().as_secs_f64();
+                                            match session_result.outcome {
+                                                SessionOutcome::Completed => {
+                                                    Ok(SessionRunState::Completed { duration_secs: duration })
+                                                }
+                                                _ => {
+                                                    Ok(SessionRunState::Failed {
+                                                        reason: session_result
+                                                            .failure_reason
+                                                            .unwrap_or_else(|| "unknown failure".to_string()),
+                                                    })
+                                                }
                                             }
                                         }
-                                    }
-                                    Err(e) => {
-                                        Ok(SessionRunState::Failed {
-                                            reason: format!("execution error: {e}"),
-                                        })
+                                        Err(e) => {
+                                            Ok(SessionRunState::Failed {
+                                                reason: format!("execution error: {e}"),
+                                            })
+                                        }
                                     }
                                 }
                             }
+                        } else {
+                            // No script — immediately complete
+                            Ok(SessionRunState::Completed {
+                                duration_secs: timer.elapsed().as_secs_f64(),
+                            })
+                        };
+
+                        // Write log file (best effort)
+                        if let Some(parent) = log_path.parent() {
+                            let _ = std::fs::create_dir_all(parent);
                         }
-                    } else {
-                        // No script — immediately complete
-                        Ok(SessionRunState::Completed {
-                            duration_secs: timer.elapsed().as_secs_f64(),
-                        })
-                    };
+                        let _ = std::fs::write(
+                            &log_path,
+                            format!("Session '{}' completed\n", name_clone),
+                        );
 
-                    // Write log file (best effort)
-                    if let Some(parent) = log_path.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    let _ = std::fs::write(
-                        &log_path,
-                        format!("Session '{}' completed\n", name_clone),
-                    );
+                        match result {
+                            Ok(state) => (name_clone, Ok(state)),
+                            Err(msg) => (name_clone, Err(msg)),
+                        }
+                    });
 
-                    match result {
-                        Ok(state) => (name_clone, Ok(state)),
-                        Err(msg) => (name_clone, Err(msg)),
+                    match handle.await {
+                        Ok(result) => result,
+                        Err(join_error) => {
+                            let msg = if join_error.is_cancelled() {
+                                "task cancelled".to_string()
+                            } else if let Ok(payload) = join_error.try_into_panic() {
+                                if let Some(s) = payload.downcast_ref::<&str>() {
+                                    format!("task panicked: {s}")
+                                } else if let Some(s) = payload.downcast_ref::<String>() {
+                                    format!("task panicked: {s}")
+                                } else {
+                                    "task panicked with unknown payload".to_string()
+                                }
+                            } else {
+                                "task failed with unknown JoinError".to_string()
+                            };
+                            (panic_name, Err(msg))
+                        }
                     }
                 });
             }
@@ -489,27 +520,28 @@ impl<G: GitOps + Clone + Send + Sync + 'static> Orchestrator<G> {
                             (name, SessionRunState::Failed { reason: msg })
                         }
                         Err(join_error) => {
-                            // JoinError: task panicked or was cancelled
+                            // JoinError: task panicked or was cancelled.
+                            // The session name is lost because JoinError doesn't carry it.
+                            // This path should be unreachable — spawned tasks catch panics
+                            // internally via catch_unwind and return them as Failed results.
                             if join_error.is_cancelled() {
-                                // Task was cancelled via abort
                                 continue;
                             }
-                            // Panic — map to failed
                             let panic_msg = if let Ok(reason) = join_error.try_into_panic() {
                                 if let Some(s) = reason.downcast_ref::<&str>() {
-                                    format!("task panicked: {s}")
+                                    format!("task panicked (uncaught): {s}")
                                 } else if let Some(s) = reason.downcast_ref::<String>() {
-                                    format!("task panicked: {s}")
+                                    format!("task panicked (uncaught): {s}")
                                 } else {
-                                    "task panicked with unknown payload".to_string()
+                                    "task panicked (uncaught) with unknown payload".to_string()
                                 }
                             } else {
                                 "task failed with unknown JoinError".to_string()
                             };
-
                             warn!("{}", panic_msg);
-                            // We can't determine which session panicked from JoinError alone
-                            // This is a limitation — the task should catch panics internally
+                            // Defensive: cannot map to a session. Log and continue — the
+                            // session will remain in `in_flight` but the catch_unwind wrapper
+                            // in the spawned task should prevent this path from being reached.
                             continue;
                         }
                     };
@@ -857,7 +889,7 @@ mod tests {
     fn make_manifest(
         name: &str,
         sessions: Vec<SessionDef>,
-        on_failure: Option<&str>,
+        on_failure: Option<FailurePolicy>,
     ) -> Manifest {
         Manifest {
             manifest: ManifestMeta {
@@ -865,7 +897,7 @@ mod tests {
                 base_ref: "HEAD".to_string(),
                 merge_strategy: None,
                 parallel_by_default: true,
-                on_failure: on_failure.map(String::from),
+                on_failure,
             },
             sessions,
         }
@@ -983,7 +1015,7 @@ mod tests {
         let manifest = make_manifest(
             "skip-deps-test",
             vec![fail_session, dep_session, independent],
-            Some("skip-dependents"),
+            Some(FailurePolicy::SkipDependents),
         );
         let manifest_content = toml::to_string(&manifest).unwrap();
 
@@ -1042,7 +1074,7 @@ mod tests {
                     vec![commit_step("add file", vec![("x.txt", "x\n")])],
                 ),
             ],
-            Some("abort"),
+            Some(FailurePolicy::Abort),
         );
         let manifest_content = toml::to_string(&manifest).unwrap();
 

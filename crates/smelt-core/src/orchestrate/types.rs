@@ -19,15 +19,6 @@ pub enum FailurePolicy {
     Abort,
 }
 
-impl From<Option<&str>> for FailurePolicy {
-    fn from(value: Option<&str>) -> Self {
-        match value {
-            Some("abort") => Self::Abort,
-            _ => Self::SkipDependents,
-        }
-    }
-}
-
 /// State of a single session within an orchestration run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
@@ -234,35 +225,6 @@ mod tests {
     }
 
     #[test]
-    fn failure_policy_from_none() {
-        assert_eq!(FailurePolicy::from(None), FailurePolicy::SkipDependents);
-    }
-
-    #[test]
-    fn failure_policy_from_abort() {
-        assert_eq!(
-            FailurePolicy::from(Some("abort")),
-            FailurePolicy::Abort
-        );
-    }
-
-    #[test]
-    fn failure_policy_from_skip_dependents() {
-        assert_eq!(
-            FailurePolicy::from(Some("skip-dependents")),
-            FailurePolicy::SkipDependents
-        );
-    }
-
-    #[test]
-    fn failure_policy_from_unknown_defaults() {
-        assert_eq!(
-            FailurePolicy::from(Some("unknown")),
-            FailurePolicy::SkipDependents
-        );
-    }
-
-    #[test]
     fn session_run_state_pending_not_terminal() {
         assert!(!SessionRunState::Pending.is_terminal());
         assert!(!SessionRunState::Pending.is_success());
@@ -412,7 +374,7 @@ mod tests {
     #[test]
     fn session_run_state_serde_round_trip() {
         let state = SessionRunState::Completed {
-            duration_secs: 3.14,
+            duration_secs: 1.5,
         };
         let json = serde_json::to_string(&state).expect("serialize");
         let back: SessionRunState = serde_json::from_str(&json).expect("deserialize");

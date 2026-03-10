@@ -1,18 +1,25 @@
 //! Run state persistence, resume detection, and manifest hash computation.
 
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use crate::orchestrate::types::RunState;
 
 /// Compute a deterministic hash of manifest content for change detection.
 ///
-/// Uses [`DefaultHasher`] (not cryptographic) — sufficient for detecting
-/// whether a manifest changed between runs.
+/// Uses FNV-1a (stable across process invocations, unlike [`DefaultHasher`]
+/// which uses SipHash with random seeds). Not cryptographic — sufficient for
+/// detecting whether a manifest changed between runs.
 pub fn compute_manifest_hash(manifest_content: &str) -> String {
-    let mut hasher = DefaultHasher::new();
-    manifest_content.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
+    // FNV-1a 64-bit — deterministic, no external crate needed
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x00000100000001B3;
+
+    let mut hash = FNV_OFFSET;
+    for byte in manifest_content.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    format!("{hash:016x}")
 }
 
 /// Manages run state persistence under `.smelt/runs/`.
