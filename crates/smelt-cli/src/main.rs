@@ -44,6 +44,13 @@ enum Commands {
         #[command(subcommand)]
         command: commands::merge::MergeCommands,
     },
+
+    /// Orchestrate multi-session execution with dependency management
+    #[command(visible_alias = "orch")]
+    Orchestrate {
+        #[command(subcommand)]
+        command: commands::orchestrate::OrchestrateCommands,
+    },
 }
 
 async fn run() -> anyhow::Result<i32> {
@@ -130,6 +137,24 @@ async fn run() -> anyhow::Result<i32> {
                 } => {
                     commands::merge::execute_merge_plan(
                         git, repo_root, &manifest, target, strategy, json,
+                    )
+                    .await
+                }
+            }
+        }
+        Some(Commands::Orchestrate { command }) => {
+            let git = GitCli::new(git_binary, repo_root.clone());
+            match command {
+                commands::orchestrate::OrchestrateCommands::Run {
+                    manifest,
+                    target,
+                    strategy,
+                    verbose,
+                    no_ai,
+                    json,
+                } => {
+                    commands::orchestrate::execute_orchestrate_run(
+                        git, repo_root, &manifest, target, strategy, verbose, no_ai, json,
                     )
                     .await
                 }
