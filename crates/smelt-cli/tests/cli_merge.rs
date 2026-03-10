@@ -122,7 +122,7 @@ files = [{ path = "beta.txt", content = "beta content\n" }]
 
     // Now merge
     smelt_cmd(&repo)
-        .args(["merge", manifest.to_str().unwrap()])
+        .args(["merge", "run", manifest.to_str().unwrap()])
         .assert()
         .success()
         .stdout(predicate::str::contains("session-alpha:"))
@@ -189,7 +189,7 @@ files = [{ path = "shared.txt", content = "content from B\n" }]
 
     // Merge should fail with conflict
     smelt_cmd(&repo)
-        .args(["merge", manifest.to_str().unwrap()])
+        .args(["merge", "run", manifest.to_str().unwrap()])
         .assert()
         .code(1)
         .stderr(predicate::str::contains("merge conflict"))
@@ -241,7 +241,7 @@ files = [{ path = "one.txt", content = "one\n" }]
 
     // Merge with custom target
     smelt_cmd(&repo)
-        .args(["merge", manifest.to_str().unwrap(), "--target", "my-custom-branch"])
+        .args(["merge", "run", manifest.to_str().unwrap(), "--target", "my-custom-branch"])
         .assert()
         .success()
         .stderr(predicate::str::contains("my-custom-branch"));
@@ -304,7 +304,7 @@ files = [{ path = "one.txt", content = "one\n" }]
 
     // Merge should fail because target exists
     smelt_cmd(&repo)
-        .args(["merge", manifest.to_str().unwrap()])
+        .args(["merge", "run", manifest.to_str().unwrap()])
         .assert()
         .code(1)
         .stderr(predicate::str::contains("already exists"));
@@ -341,7 +341,7 @@ files = [{ path = "one.txt", content = "one\n" }]
 
     // Don't run sessions — go straight to merge
     smelt_cmd(&repo)
-        .args(["merge", manifest.to_str().unwrap()])
+        .args(["merge", "run", manifest.to_str().unwrap()])
         .assert()
         .code(1)
         .stderr(predicate::str::contains("no completed sessions"));
@@ -357,7 +357,7 @@ fn test_merge_manifest_not_found() {
     smelt_cmd(&repo).arg("init").assert().success();
 
     smelt_cmd(&repo)
-        .args(["merge", "nonexistent.toml"])
+        .args(["merge", "run", "nonexistent.toml"])
         .assert()
         .code(1)
         .stderr(predicate::str::contains("Error"));
@@ -432,7 +432,7 @@ files = [{ path = "two.txt", content = "two\n" }]
 
     // Merge should succeed with 2 sessions, skip the failed one
     smelt_cmd(&repo)
-        .args(["merge", manifest.to_str().unwrap()])
+        .args(["merge", "run", manifest.to_str().unwrap()])
         .assert()
         .success()
         .stdout(predicate::str::contains("good-one:"))
