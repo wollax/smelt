@@ -13,8 +13,8 @@ pub use error::{Result, SmeltError};
 pub use git::{GitCli, GitOps, preflight};
 pub use init::init_project;
 pub use merge::{
-    ConflictAction, ConflictHandler, MergeOpts, MergeOrderStrategy, MergePlan, MergeReport,
-    NoopConflictHandler, ResolutionMethod,
+    AiConflictHandler, ConflictAction, ConflictHandler, MergeOpts, MergeOrderStrategy, MergePlan,
+    MergeReport, NoopConflictHandler, ResolutionMethod,
 };
 pub use session::{Manifest, SessionResult, SessionRunner};
 pub use worktree::{CreateWorktreeOpts, RemoveResult, WorktreeInfo, WorktreeManager};
