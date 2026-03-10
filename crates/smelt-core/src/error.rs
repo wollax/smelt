@@ -87,6 +87,14 @@ pub enum SmeltError {
     /// AI resolution failed (provider error, empty response, invalid output).
     #[error("AI resolution failed: {message}")]
     AiResolution { message: String },
+
+    /// Orchestration error (DAG validation, execution lifecycle).
+    #[error("orchestration error: {message}")]
+    Orchestration { message: String },
+
+    /// Dependency cycle detected in manifest.
+    #[error("dependency cycle detected in manifest: {details}")]
+    DependencyCycle { details: String },
 }
 
 impl SmeltError {

@@ -214,6 +214,8 @@ mod tests {
                 name: "test-manifest".to_string(),
                 base_ref: "HEAD".to_string(),
                 merge_strategy: None,
+                parallel_by_default: true,
+                on_failure: None,
             },
             sessions,
         }
@@ -228,6 +230,7 @@ mod tests {
             base_ref: None,
             timeout_secs: None,
             env: None,
+            depends_on: None,
             script: Some(ScriptDef {
                 backend: "scripted".to_string(),
                 exit_after: None,
@@ -443,6 +446,7 @@ mod tests {
             base_ref: None,
             timeout_secs: None,
             env: None,
+            depends_on: None,
             script: None,
         }]);
 
@@ -483,6 +487,7 @@ mod tests {
             base_ref: Some("HEAD".to_string()),
             timeout_secs: None,
             env: None,
+            depends_on: None,
             script: Some(ScriptDef {
                 backend: "scripted".to_string(),
                 exit_after: None,

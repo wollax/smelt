@@ -14,7 +14,7 @@ repository = "https://github.com/wollax/smelt"
 clap = { version = "4.5", features = ["derive"] }
 
 # Async
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "process"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "signal"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -57,6 +57,15 @@ genai = "0.5"
 
 # Diff display
 similar = { version = "2", features = ["unicode"] }
+
+# DAG / graph
+petgraph = "0.7"
+
+# Terminal progress
+indicatif = "0.17"
+
+# Async utilities (cancellation)
+tokio-util = { version = "0.7", features = ["rt"] }
 
 # Dev/test
 assert_cmd = "2"

@@ -2,27 +2,27 @@
 
 ## Current Position
 
-Phase: 7 of 10 — AI Conflict Resolution
+Phase: 8 of 10 — Orchestration Plan & Task Graph
 Plan: 3 of 3 complete
-Status: Phase verified and complete
-Progress: █████████░ 9/10
+Status: Phase complete
+Progress: ████████████ 12/12
 
-Last activity: 2026-03-10 — Phase 7 verified (19/19 must-haves) and completed
+Last activity: 2026-03-10 — Completed 08-03-PLAN.md (CLI command & integration tests)
 
 ## Session Continuity
 
-Last session: 2026-03-10T23:00:00Z
-Stopped at: Completed Phase 7 (AI Conflict Resolution)
+Last session: 2026-03-10T22:50:00Z
+Stopped at: Completed 08-03-PLAN.md
 Resume file: None
 
 ## Performance Metrics
 
 | Metric | Value |
 |--------|-------|
-| Phases completed | 7 |
-| Phases remaining | 3 |
-| Plans completed (phase 7) | 3/3 |
-| Requirements covered | 10/12 |
+| Phases completed | 8 |
+| Phases remaining | 2 |
+| Plans completed (phase 8) | 3/3 |
+| Requirements covered | 12/12 |
 | Blockers | 0 |
 | Technical debt items | 0 |
 
@@ -43,7 +43,7 @@ Resume file: None
 - Binary named "smelt" via [[bin]] in smelt-cli
 - GitOps trait uses native async fn (RPITIT) — no async-trait or trait_variant crate needed
 - preflight() is synchronous (std::process::Command) — runs before tokio runtime
-- SmeltError has 19 variants: original 14 + 3 merge-specific + MergeAborted + AiResolution
+- SmeltError has 21 variants: original 14 + 3 merge-specific + MergeAborted + AiResolution + Orchestration + DependencyCycle
 - CLI uses clap derive with Optional subcommand for context-aware no-args behavior
 - Tracing subscriber writes to stderr; stdout reserved for structured output
 - `--no-color` disables console colors on both stdout and stderr
@@ -148,6 +148,35 @@ Resume file: None
 - build_conflict_handler factory: checks no_ai, TTY, AiConfig.enabled, GenAiProvider::new() — fallback chain
 - Retry-with-feedback: reject -> prompt feedback -> build_retry_prompt -> provider.complete() up to max_retries
 - Non-TTY always falls back to InteractiveConflictHandler (propagates MergeConflict error)
+- petgraph 0.7, indicatif 0.17, tokio-util 0.7 added as workspace dependencies; tokio gains "signal" feature
+- Manifest supports depends_on (per-session), parallel_by_default (manifest-level, default true), on_failure (manifest-level)
+- Cycle detection via petgraph in both manifest validate() and build_dag() — belt and suspenders
+- ready_set treats skipped deps as satisfied — allows independent sessions to proceed under SkipDependents
+- RunState persists as state.json (not TOML) — JSON matches serde tagged enum serialization naturally
+- FailurePolicy::from(Option<&str>) defaults to SkipDependents for unknown values
+- SessionDag is DiGraph<String, ()> — nodes are session names, edges are dependency relationships
+- build_dag() adds implicit sequential chain edges when parallel_by_default=false for sessions without depends_on
+- mark_skipped_dependents() uses BFS to propagate failure transitively through outgoing edges
+- OrchestrationOpts carries target_branch, strategy, verbose, no_ai, json
+- OrchestrationReport carries run_id, session_results, merge_report, elapsed_secs, outcome
+- RunStateManager wraps .smelt/runs/ directory for state persistence, resume detection, log paths, cleanup
+- compute_manifest_hash uses DefaultHasher (not cryptographic) — sufficient for manifest change detection
+- Orchestrator<G: GitOps + Clone + Send + Sync + 'static> owns git + repo_root
+- Orchestrator::run() lifecycle: build DAG → create worktrees (sequential) → execute sessions (parallel JoinSet) → merge (MergeRunner)
+- Orchestrator::resume() validates manifest hash, then resumes from Sessions or Merging phase
+- Worktree state files (.smelt/worktrees/<session>.toml) updated after session execution for MergeRunner compatibility
+- JoinError panics caught via try_into_panic(), mapped to Failed — never unwrapped
+- CancellationToken child tokens created per session; parent cancel aborts all via join_set.abort_all()
+- Merge phase builds filtered Manifest with only Completed sessions, delegates to MergeRunner::run()
+- Orchestrator composes existing components (WorktreeManager, ScriptExecutor, MergeRunner) — no re-implementation
+- CLI `smelt orchestrate run <manifest>` with visible alias `orch`; flags: --target, --strategy, --verbose, --no-ai, --json
+- OrchestrateConflictHandler enum dispatcher (separate from MergeConflictHandler) — keeps modules decoupled
+- Live dashboard via indicatif::MultiProgress with per-session ProgressBar spinners; non-TTY falls back to eprintln line-by-line
+- Summary table via comfy-table; sessions sorted alphabetically for deterministic output
+- CancellationToken + tokio::signal::ctrl_c spawn for graceful Ctrl-C shutdown
+- Resume detection: RunStateManager::find_incomplete_run() + manifest hash validation + dialoguer::Confirm prompt (TTY only)
+- --json outputs OrchestrationReport via serde_json::to_string_pretty to stdout
+- Exit code 0 on success, 1 on any failure/skip/cancel
 
 ### Blockers
 

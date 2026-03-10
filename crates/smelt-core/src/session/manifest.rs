@@ -6,6 +6,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, SmeltError};
+use crate::orchestrate::types::FailurePolicy;
 
 /// Top-level session manifest, parsed from a TOML file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,10 +24,21 @@ pub struct ManifestMeta {
     pub base_ref: String,
     /// Merge ordering strategy (optional; CLI flag overrides this).
     pub merge_strategy: Option<crate::merge::types::MergeOrderStrategy>,
+    /// Whether sessions run in parallel by default (default: true).
+    /// Sessions without explicit `depends_on` run concurrently when true,
+    /// or sequentially in manifest order when false.
+    #[serde(default = "default_parallel")]
+    pub parallel_by_default: bool,
+    /// Failure policy for orchestration — governs behavior when a session fails.
+    pub on_failure: Option<FailurePolicy>,
 }
 
 fn default_base_ref() -> String {
     "HEAD".to_string()
+}
+
+fn default_parallel() -> bool {
+    true
 }
 
 /// Definition of a single session within a manifest.
@@ -45,6 +57,8 @@ pub struct SessionDef {
     pub timeout_secs: Option<u64>,
     /// Environment variable overrides.
     pub env: Option<HashMap<String, String>>,
+    /// Sessions that must complete before this session starts.
+    pub depends_on: Option<Vec<String>>,
     /// Script definition (required for scripted backend).
     pub script: Option<ScriptDef>,
 }
@@ -164,6 +178,90 @@ impl Manifest {
                     }
                 }
             }
+
+            // Validate depends_on references
+            if let Some(ref deps) = session.depends_on {
+                for dep in deps {
+                    // Self-dependency check
+                    if dep == &session.name {
+                        return Err(SmeltError::ManifestParse(format!(
+                            "session '{}' cannot depend on itself",
+                            session.name
+                        )));
+                    }
+                }
+            }
+        }
+
+        // Second pass: validate depends_on references exist and check for cycles
+        let name_set: HashSet<&str> = self.sessions.iter().map(|s| s.name.as_str()).collect();
+        for session in &self.sessions {
+            if let Some(ref deps) = session.depends_on {
+                for dep in deps {
+                    if !name_set.contains(dep.as_str()) {
+                        return Err(SmeltError::ManifestParse(format!(
+                            "session '{}' depends on unknown session '{dep}'",
+                            session.name
+                        )));
+                    }
+                }
+            }
+        }
+
+        // Cycle detection using petgraph
+        self.validate_no_cycles()?;
+
+        Ok(())
+    }
+
+    /// Build a dependency graph and check for cycles.
+    fn validate_no_cycles(&self) -> Result<()> {
+        use petgraph::algo::is_cyclic_directed;
+        use petgraph::graph::DiGraph;
+
+        let mut graph = DiGraph::<&str, ()>::new();
+        let mut name_to_idx = HashMap::new();
+
+        for session in &self.sessions {
+            let idx = graph.add_node(session.name.as_str());
+            name_to_idx.insert(session.name.as_str(), idx);
+        }
+
+        // Add explicit dependency edges
+        for session in &self.sessions {
+            if let Some(ref deps) = session.depends_on {
+                let to = name_to_idx[session.name.as_str()];
+                for dep in deps {
+                    let from = name_to_idx[dep.as_str()];
+                    graph.add_edge(from, to, ());
+                }
+            }
+        }
+
+        // Add implicit sequential edges when parallel_by_default=false
+        if !self.manifest.parallel_by_default {
+            let no_deps: Vec<&str> = self
+                .sessions
+                .iter()
+                .filter(|s| s.depends_on.is_none())
+                .map(|s| s.name.as_str())
+                .collect();
+            for pair in no_deps.windows(2) {
+                let from = name_to_idx[pair[0]];
+                let to = name_to_idx[pair[1]];
+                graph.add_edge(from, to, ());
+            }
+        }
+
+        if is_cyclic_directed(&graph) {
+            // Find the cycle participants for a useful error message
+            let cycle_names: Vec<&str> = graph.node_indices().map(|n| graph[n]).collect();
+            return Err(SmeltError::DependencyCycle {
+                details: format!(
+                    "sessions form a dependency cycle (check depends_on in: {})",
+                    cycle_names.join(", ")
+                ),
+            });
         }
 
         Ok(())
@@ -260,6 +358,8 @@ files = [
                 name: "empty".to_string(),
                 base_ref: "HEAD".to_string(),
                 merge_strategy: None,
+                parallel_by_default: true,
+                on_failure: None,
             },
             sessions: vec![],
         };
@@ -434,6 +534,158 @@ file_scope = ["[invalid"]
             err.to_string().contains("invalid glob pattern"),
             "got: {err}"
         );
+    }
+
+    #[test]
+    fn parse_manifest_with_depends_on() {
+        let toml = r#"
+[manifest]
+name = "deps-test"
+
+[[session]]
+name = "base"
+task = "Base task"
+
+[[session]]
+name = "dependent"
+task = "Depends on base"
+depends_on = ["base"]
+"#;
+        let manifest = Manifest::parse(toml).expect("should parse");
+        assert!(manifest.sessions[0].depends_on.is_none());
+        assert_eq!(
+            manifest.sessions[1].depends_on.as_deref(),
+            Some(&["base".to_string()][..])
+        );
+    }
+
+    #[test]
+    fn parse_manifest_with_parallel_by_default_false() {
+        let toml = r#"
+[manifest]
+name = "sequential"
+parallel_by_default = false
+
+[[session]]
+name = "s1"
+task = "First"
+
+[[session]]
+name = "s2"
+task = "Second"
+"#;
+        let manifest = Manifest::parse(toml).expect("should parse");
+        assert!(!manifest.manifest.parallel_by_default);
+    }
+
+    #[test]
+    fn parse_manifest_with_on_failure_abort() {
+        let toml = r#"
+[manifest]
+name = "abort-test"
+on_failure = "abort"
+
+[[session]]
+name = "s1"
+task = "Task"
+"#;
+        let manifest = Manifest::parse(toml).expect("should parse");
+        assert_eq!(
+            manifest.manifest.on_failure,
+            Some(FailurePolicy::Abort)
+        );
+    }
+
+    #[test]
+    fn parse_rejects_unknown_on_failure() {
+        let toml = r#"
+[manifest]
+name = "bad-policy"
+on_failure = "retry"
+
+[[session]]
+name = "s1"
+task = "Task"
+"#;
+        let err = Manifest::parse(toml).unwrap_err();
+        // Serde rejects unknown enum variants at parse time
+        assert!(
+            err.to_string().contains("on_failure"),
+            "expected on_failure parse error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_dangling_depends_on() {
+        let toml = r#"
+[manifest]
+name = "dangling"
+
+[[session]]
+name = "s1"
+task = "Task"
+depends_on = ["nonexistent"]
+"#;
+        let err = Manifest::parse(toml).unwrap_err();
+        assert!(
+            err.to_string().contains("depends on unknown session 'nonexistent'"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_self_dependency() {
+        let toml = r#"
+[manifest]
+name = "self-dep"
+
+[[session]]
+name = "s1"
+task = "Task"
+depends_on = ["s1"]
+"#;
+        let err = Manifest::parse(toml).unwrap_err();
+        assert!(
+            err.to_string().contains("cannot depend on itself"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_dependency_cycle() {
+        let toml = r#"
+[manifest]
+name = "cycle"
+
+[[session]]
+name = "a"
+task = "Task A"
+depends_on = ["b"]
+
+[[session]]
+name = "b"
+task = "Task B"
+depends_on = ["a"]
+"#;
+        let err = Manifest::parse(toml).unwrap_err();
+        assert!(
+            err.to_string().contains("dependency cycle"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn parallel_by_default_true_is_default() {
+        let toml = r#"
+[manifest]
+name = "defaults"
+
+[[session]]
+name = "s1"
+task = "Task"
+"#;
+        let manifest = Manifest::parse(toml).expect("should parse");
+        assert!(manifest.manifest.parallel_by_default);
     }
 
     #[test]

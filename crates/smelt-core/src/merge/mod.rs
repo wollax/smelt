@@ -699,6 +699,8 @@ mod tests {
                 name: name.to_string(),
                 base_ref: "HEAD".to_string(),
                 merge_strategy: None,
+                parallel_by_default: true,
+                on_failure: None,
             },
             sessions: sessions
                 .iter()
@@ -710,6 +712,7 @@ mod tests {
                     base_ref: None,
                     timeout_secs: None,
                     env: None,
+                    depends_on: None,
                     script: None,
                 })
                 .collect(),
