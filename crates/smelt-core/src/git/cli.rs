@@ -228,7 +228,6 @@ impl GitOps for GitCli {
         &self,
         work_dir: &Path,
         source_ref: &str,
-        session_name: &str,
     ) -> Result<()> {
         let output = Command::new(&self.git_binary)
             .args(["merge", "--squash", source_ref])
@@ -247,7 +246,7 @@ impl GitOps for GitCli {
         if stdout.contains("CONFLICT") || stderr.contains("CONFLICT") {
             let files = self.unmerged_files(work_dir).await?;
             return Err(SmeltError::MergeConflict {
-                session: session_name.to_string(),
+                session: String::new(),
                 files,
             });
         }
@@ -272,13 +271,32 @@ impl GitOps for GitCli {
     }
 
     async fn unmerged_files(&self, work_dir: &Path) -> Result<Vec<String>> {
-        let output = self
-            .run_in(work_dir, &["diff", "--name-only", "--diff-filter=U"])
-            .await?;
-        if output.is_empty() {
+        let output = Command::new(&self.git_binary)
+            .args(["diff", "--name-only", "--diff-filter=U"])
+            .current_dir(work_dir)
+            .output()
+            .await
+            .map_err(|e| {
+                SmeltError::io("running git diff --name-only --diff-filter=U", work_dir, e)
+            })?;
+
+        // git diff can exit with 0 (no differences) or 1 (differences found);
+        // only treat other codes as errors.
+        let code = output.status.code().unwrap_or(-1);
+        if code != 0 && code != 1 {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(SmeltError::GitExecution {
+                operation: "diff --name-only --diff-filter=U".to_string(),
+                message: format!("exit code {code}: {}", stderr.trim()),
+            });
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let trimmed = stdout.trim();
+        if trimmed.is_empty() {
             return Ok(Vec::new());
         }
-        Ok(output.lines().map(|l| l.to_string()).collect())
+        Ok(trimmed.lines().map(|l| l.to_string()).collect())
     }
 
     async fn reset_hard(&self, work_dir: &Path, target_ref: &str) -> Result<()> {
@@ -870,7 +888,7 @@ mod tests {
             .expect("worktree_add_existing");
 
         // Squash merge
-        cli.merge_squash(&wt_path, "feature-squash", "test-session")
+        cli.merge_squash(&wt_path, "feature-squash")
             .await
             .expect("merge_squash should succeed");
 
@@ -961,13 +979,13 @@ mod tests {
             .await
             .expect("worktree_add_existing");
 
-        let result = cli.merge_squash(&wt_path, "branch-y", "session-y").await;
+        let result = cli.merge_squash(&wt_path, "branch-y").await;
         assert!(result.is_err(), "merge_squash should fail with conflict");
 
         let err = result.unwrap_err();
         match &err {
             SmeltError::MergeConflict { session, files } => {
-                assert_eq!(session, "session-y");
+                assert!(session.is_empty(), "GitOps should not set session name");
                 assert!(
                     files.contains(&"README.md".to_string()),
                     "conflicting files should contain README.md, got: {files:?}"

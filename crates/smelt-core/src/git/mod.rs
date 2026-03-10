@@ -11,9 +11,8 @@ use crate::worktree::GitWorktreeEntry;
 
 /// Async interface for git operations.
 ///
-/// Implementations shell out to `git` or use a library. The trait is the
-/// primary test seam — production code uses [`GitCli`], tests can substitute
-/// a fake.
+/// The current implementation shells out to `git`. The trait exists as a
+/// test seam — production code uses [`GitCli`], tests can substitute a fake.
 pub trait GitOps {
     /// Return the repository root directory.
     fn repo_root(&self) -> impl Future<Output = Result<PathBuf>> + Send;
@@ -98,13 +97,12 @@ pub trait GitOps {
 
     /// Perform a squash merge of `source_ref` into the current branch of `work_dir`.
     /// Returns `Ok(())` on clean merge (changes staged, not committed).
-    /// Returns `SmeltError::MergeConflict` on conflict (with file list).
+    /// Returns `SmeltError::MergeConflict` on conflict (with file list, session empty).
     /// Returns `SmeltError::GitExecution` on other git errors.
     fn merge_squash(
         &self,
         work_dir: &Path,
         source_ref: &str,
-        session_name: &str,
     ) -> impl Future<Output = Result<()>> + Send;
 
     /// Check out an existing branch into a new worktree path (no `-b` flag).

@@ -2,9 +2,19 @@
 
 /// Options for a merge operation.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct MergeOpts {
     /// Override the target branch name (default: `smelt/merge/<manifest-name>`).
     pub target_branch: Option<String>,
+}
+
+impl MergeOpts {
+    /// Create merge options with a custom target branch.
+    pub fn with_target_branch(target: String) -> Self {
+        Self {
+            target_branch: Some(target),
+        }
+    }
 }
 
 /// Per-file diff statistics.

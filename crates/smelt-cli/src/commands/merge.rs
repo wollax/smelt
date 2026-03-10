@@ -30,8 +30,9 @@ pub async fn execute_merge(
     );
 
     let runner = MergeRunner::new(git, repo_root);
-    let opts = MergeOpts {
-        target_branch: target,
+    let opts = match target {
+        Some(branch) => MergeOpts::with_target_branch(branch),
+        None => MergeOpts::default(),
     };
 
     match runner.run(&manifest, opts).await {
@@ -99,6 +100,9 @@ pub async fn execute_merge(
             eprintln!("Error: session '{session}': {message}");
             Ok(1)
         }
-        Err(e) => Err(e.into()),
+        Err(e) => {
+            eprintln!("Error: {e}");
+            Ok(1)
+        }
     }
 }

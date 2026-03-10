@@ -138,6 +138,10 @@ impl<G: GitOps + Clone> MergeRunner<G> {
                 // Rollback: clean up temp worktree + target branch
                 let _ = self.git.reset_hard(&temp_path, "HEAD").await;
                 let _ = self.git.worktree_remove(&temp_path, true).await;
+                // Filesystem fallback if worktree_remove failed to clean up
+                if temp_path.exists() {
+                    let _ = std::fs::remove_dir_all(&temp_path);
+                }
                 let _ = self.git.worktree_prune().await;
                 let _ = self.git.branch_delete(&target_branch, true).await;
                 Err(e)
@@ -169,6 +173,13 @@ impl<G: GitOps + Clone> MergeRunner<G> {
             let state = WorktreeState::load(&state_file)?;
 
             match state.status {
+                SessionStatus::Created => {
+                    return Err(SmeltError::SessionError {
+                        session: session_def.name.clone(),
+                        message: "session has not started yet — cannot merge before execution"
+                            .to_string(),
+                    });
+                }
                 SessionStatus::Running => {
                     return Err(SmeltError::SessionError {
                         session: session_def.name.clone(),
@@ -220,20 +231,33 @@ impl<G: GitOps + Clone> MergeRunner<G> {
 
             // Squash merge
             self.git
-                .merge_squash(temp_path, &session.branch_name, &session.session_name)
-                .await?;
+                .merge_squash(temp_path, &session.branch_name)
+                .await
+                .map_err(|e| match e {
+                    SmeltError::MergeConflict { files, .. } => SmeltError::MergeConflict {
+                        session: session.session_name.clone(),
+                        files,
+                    },
+                    other => other,
+                })?;
 
             // Commit
             let commit_msg =
                 format_commit_message(&session.session_name, session.task_description.as_deref(), target_branch, &session.branch_name);
             let commit_hash = self.git.commit(temp_path, &commit_msg).await?;
 
-            // Diff stats
-            let numstat = self
-                .git
-                .diff_numstat(&format!("{commit_hash}^"), &commit_hash)
-                .await
-                .unwrap_or_default();
+            // Diff stats — resolve to full hash to avoid short-hash ambiguity
+            let full_hash = self.git.rev_parse(&commit_hash).await?;
+            let numstat = match self.git.diff_numstat(&format!("{full_hash}^"), &full_hash).await {
+                Ok(stats) => stats,
+                Err(e) => {
+                    warn!(
+                        "failed to get diff stats for session '{}': {e}",
+                        session.session_name
+                    );
+                    Vec::new()
+                }
+            };
 
             let diff_stats: Vec<DiffStat> = numstat
                 .iter()
@@ -272,11 +296,13 @@ fn format_commit_message(
     let subject = match task {
         Some(desc) => {
             let prefix = format!("merge({session_name}): ");
-            let max_desc = 72 - prefix.len();
-            if desc.len() > max_desc {
-                format!("{prefix}{}...", &desc[..max_desc - 3])
-            } else {
+            let max_desc = 72_usize.saturating_sub(prefix.len());
+            if max_desc <= 3 || desc.len() <= max_desc {
+                // Prefix alone exceeds/meets limit, or desc fits — use full desc
                 format!("{prefix}{desc}")
+            } else {
+                let boundary = desc.floor_char_boundary(max_desc - 3);
+                format!("{prefix}{}...", &desc[..boundary])
             }
         }
         None => format!("merge({session_name}): squash merge into {target_branch}"),
