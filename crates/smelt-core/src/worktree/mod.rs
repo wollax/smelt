@@ -119,7 +119,13 @@ impl<G: GitOps> WorktreeManager<G> {
         let worktree_path = self
             .repo_root
             .parent()
-            .expect("repo_root should have a parent directory")
+            .ok_or_else(|| SmeltError::GitExecution {
+                operation: "worktree create".to_string(),
+                message: format!(
+                    "repository root '{}' has no parent directory",
+                    self.repo_root.display()
+                ),
+            })?
             .join(&dir_name);
 
         // 5. Check worktree path doesn't already exist on disk
@@ -267,9 +273,10 @@ impl<G: GitOps> WorktreeManager<G> {
             state_file_removed: false,
         };
 
-        // 3. Check if worktree is dirty (only if it exists on disk)
-        if abs_path.exists() {
-            if !force {
+        // 3. Pre-flight checks (fail early before any destructive action)
+        if !force {
+            // Check dirty status
+            if abs_path.exists() {
                 let dirty = self.git.worktree_is_dirty(&abs_path).await?;
                 if dirty {
                     return Err(SmeltError::WorktreeDirty {
@@ -278,15 +285,8 @@ impl<G: GitOps> WorktreeManager<G> {
                 }
             }
 
-            // 4. Remove worktree
-            self.git.worktree_remove(&abs_path, force).await?;
-            result.worktree_removed = true;
-        }
-
-        // 5. Check branch merge status and delete branch
-        if self.git.branch_exists(&state.branch_name).await? {
-            if !force {
-                // Use the default branch or HEAD as base for merge check
+            // Check branch merge status
+            if self.git.branch_exists(&state.branch_name).await? {
                 let is_merged = self
                     .git
                     .branch_is_merged(&state.branch_name, "HEAD")
@@ -297,6 +297,16 @@ impl<G: GitOps> WorktreeManager<G> {
                     });
                 }
             }
+        }
+
+        // 4. Remove worktree (safe — pre-flight passed)
+        if abs_path.exists() {
+            self.git.worktree_remove(&abs_path, force).await?;
+            result.worktree_removed = true;
+        }
+
+        // 5. Delete branch
+        if self.git.branch_exists(&state.branch_name).await? {
             self.git.branch_delete(&state.branch_name, force).await?;
             result.branch_deleted = true;
         }

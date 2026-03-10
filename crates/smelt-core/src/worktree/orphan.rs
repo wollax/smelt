@@ -13,10 +13,14 @@ pub const DEFAULT_STALENESS_HOURS: i64 = 24;
 /// Check if a process with the given PID is alive.
 ///
 /// Returns `true` if the process exists and we have permission to signal it.
+/// Returns `false` for PIDs that exceed `i32::MAX` (invalid on POSIX).
 pub fn is_pid_alive(pid: u32) -> bool {
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
     // SAFETY: kill(pid, 0) sends no signal, only checks if the process exists.
     // This is a standard POSIX pattern.
-    unsafe { libc::kill(pid as i32, 0) == 0 }
+    unsafe { libc::kill(pid, 0) == 0 }
 }
 
 /// Determine whether a worktree session is likely orphaned.
