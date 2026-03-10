@@ -1,5 +1,6 @@
 //! Sequential merge engine for combining completed session worktrees.
 
+pub mod conflict;
 pub mod ordering;
 pub mod types;
 
@@ -8,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use tracing::{info, warn};
 
+pub use conflict::{ConflictHunk, ConflictScan, scan_conflict_markers};
 pub use types::{
     ConflictAction, DiffStat, MergeOpts, MergeOrderStrategy, MergePlan, MergeReport,
     MergeSessionResult, PairwiseOverlap, ResolutionMethod, SessionPlanEntry,

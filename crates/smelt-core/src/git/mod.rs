@@ -137,6 +137,10 @@ pub trait GitOps {
         head_ref: &str,
     ) -> impl Future<Output = Result<Vec<String>>> + Send;
 
+    /// List commit subjects in a range.
+    /// Uses `git log --format="%s" <range>`.
+    fn log_subjects(&self, range: &str) -> impl Future<Output = Result<Vec<String>>> + Send;
+
     /// Get diff stats between two refs. Returns Vec of (insertions, deletions, filename).
     fn diff_numstat(
         &self,

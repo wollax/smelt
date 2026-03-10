@@ -309,6 +309,14 @@ impl GitOps for GitCli {
         self.run(&["rev-parse", rev]).await
     }
 
+    async fn log_subjects(&self, range: &str) -> Result<Vec<String>> {
+        let output = self.run(&["log", "--format=%s", range]).await?;
+        if output.is_empty() {
+            return Ok(Vec::new());
+        }
+        Ok(output.lines().map(|l| l.to_string()).collect())
+    }
+
     async fn diff_name_only(&self, base_ref: &str, head_ref: &str) -> Result<Vec<String>> {
         let output = self.run(&["diff", "--name-only", base_ref, head_ref]).await?;
         if output.is_empty() {
@@ -1195,5 +1203,52 @@ mod tests {
             .expect("diff_name_only same ref");
 
         assert!(files.is_empty(), "same ref should have no diff");
+    }
+
+    #[tokio::test]
+    async fn test_log_subjects() {
+        let (tmp, cli) = setup_test_repo();
+        let git = which::which("git").expect("git on PATH");
+
+        // Create 2 additional commits with known subjects
+        for (i, subject) in ["Add feature A", "Fix bug B"].iter().enumerate() {
+            std::fs::write(
+                tmp.path().join(format!("log_test_{i}.txt")),
+                format!("content {i}\n"),
+            )
+            .unwrap();
+            std::process::Command::new(&git)
+                .args(["add", &format!("log_test_{i}.txt")])
+                .current_dir(tmp.path())
+                .output()
+                .expect("git add");
+            std::process::Command::new(&git)
+                .args(["commit", "-m", subject])
+                .current_dir(tmp.path())
+                .output()
+                .expect("git commit");
+        }
+
+        let subjects = cli
+            .log_subjects("HEAD~2..HEAD")
+            .await
+            .expect("log_subjects");
+
+        assert_eq!(subjects.len(), 2, "should have 2 commit subjects");
+        // git log returns newest first
+        assert_eq!(subjects[0], "Fix bug B");
+        assert_eq!(subjects[1], "Add feature A");
+    }
+
+    #[tokio::test]
+    async fn test_log_subjects_empty_range() {
+        let (_tmp, cli) = setup_test_repo();
+
+        let subjects = cli
+            .log_subjects("HEAD..HEAD")
+            .await
+            .expect("log_subjects empty");
+
+        assert!(subjects.is_empty(), "same ref range should be empty");
     }
 }
