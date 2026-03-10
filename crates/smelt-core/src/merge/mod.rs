@@ -1140,4 +1140,230 @@ mod tests {
             "target branch should be rolled back"
         );
     }
+
+    /// A conflict handler that resolves conflicts by stripping conflict markers.
+    struct ResolveConflictHandler;
+
+    impl ConflictHandler for ResolveConflictHandler {
+        async fn handle_conflict(
+            &self,
+            _session_name: &str,
+            files: &[String],
+            _scan: &conflict::ConflictScan,
+            work_dir: &Path,
+        ) -> Result<ConflictAction> {
+            for file in files {
+                let path = work_dir.join(file);
+                let content = std::fs::read_to_string(&path).unwrap_or_default();
+                let resolved: String = content
+                    .lines()
+                    .filter(|l| {
+                        !l.starts_with("<<<<<<<")
+                            && !l.starts_with("=======")
+                            && !l.starts_with(">>>>>>>")
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                std::fs::write(&path, format!("{resolved}\n")).unwrap();
+            }
+            Ok(ConflictAction::Resolved)
+        }
+    }
+
+    #[tokio::test]
+    async fn test_merge_conflict_resolve_flow() {
+        let (_tmp, git, repo_path) = setup_test_repo();
+        init_smelt(&repo_path);
+
+        // Two sessions that conflict on the same file (README.md)
+        create_test_session(
+            &git,
+            &repo_path,
+            "resolve-a",
+            &[("README.md", "resolve-a content\n"), ("a_only.txt", "a\n")],
+            Some("Add a"),
+        )
+        .await;
+        create_test_session(
+            &git,
+            &repo_path,
+            "resolve-b",
+            &[("README.md", "resolve-b content\n"), ("b_only.txt", "b\n")],
+            Some("Add b"),
+        )
+        .await;
+
+        let manifest = make_manifest(
+            "resolve-test",
+            &[("resolve-a", Some("Add a")), ("resolve-b", Some("Add b"))],
+        );
+        let runner = MergeRunner::new(git.clone(), repo_path.clone());
+        let report = runner
+            .run(&manifest, MergeOpts::default(), &ResolveConflictHandler)
+            .await
+            .expect("merge should succeed with resolve handler");
+
+        // Both sessions should be merged
+        assert_eq!(report.sessions_merged.len(), 2);
+        assert_eq!(report.sessions_merged[0].session_name, "resolve-a");
+        assert_eq!(
+            report.sessions_merged[0].resolution,
+            Some(ResolutionMethod::Clean)
+        );
+        assert_eq!(report.sessions_merged[1].session_name, "resolve-b");
+        assert_eq!(
+            report.sessions_merged[1].resolution,
+            Some(ResolutionMethod::Manual)
+        );
+
+        // Report fields
+        assert_eq!(report.sessions_resolved, vec!["resolve-b"]);
+        assert!(report.sessions_conflict_skipped.is_empty());
+
+        // Target branch should exist
+        assert!(
+            git.branch_exists("smelt/merge/resolve-test").await.unwrap(),
+            "target branch should exist"
+        );
+
+        // Verify commit message contains [resolved: manual]
+        let subjects = git
+            .log_subjects(&format!("{}..smelt/merge/resolve-test", report.base_commit))
+            .await
+            .expect("log_subjects should work");
+        let resolved_commit = subjects
+            .iter()
+            .find(|s| s.contains("resolve-b"))
+            .expect("should have a commit for resolve-b");
+        assert!(
+            resolved_commit.contains("[resolved: manual]"),
+            "commit message should contain resolution suffix, got: {resolved_commit}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_merge_conflict_skip_continues() {
+        let (_tmp, git, repo_path) = setup_test_repo();
+        init_smelt(&repo_path);
+
+        // Session A: clean (modifies a.txt only)
+        create_test_session(
+            &git,
+            &repo_path,
+            "clean-a",
+            &[("a.txt", "clean-a content\n")],
+            Some("Add a"),
+        )
+        .await;
+
+        // Session B: conflicts with A on README.md (both modify it)
+        create_test_session(
+            &git,
+            &repo_path,
+            "conflict-b",
+            &[("README.md", "conflict-b content\n")],
+            Some("Edit readme B"),
+        )
+        .await;
+
+        // Session C: clean (modifies c.txt only, no overlap)
+        create_test_session(
+            &git,
+            &repo_path,
+            "clean-c",
+            &[("c.txt", "clean-c content\n")],
+            Some("Add c"),
+        )
+        .await;
+
+        // Also create a conflicting README.md change in session A so B conflicts
+        // Actually, session A doesn't touch README.md. We need A to be first and
+        // modify README.md so B conflicts with the merged state.
+        // Let's restructure: A modifies README.md, B also modifies README.md differently.
+        // We already have this setup — A creates a.txt (clean), but we need the
+        // conflict on B. Since A merges first without touching README.md, B's
+        // README.md change might merge cleanly against the base.
+        //
+        // For a guaranteed conflict, make A also modify README.md:
+        // Re-setup with explicit conflicts.
+
+        // Drop the previous sessions and recreate
+        let (_tmp2, git2, repo_path2) = setup_test_repo();
+        init_smelt(&repo_path2);
+
+        create_test_session(
+            &git2,
+            &repo_path2,
+            "skip-clean-a",
+            &[
+                ("a.txt", "clean-a content\n"),
+                ("README.md", "modified by A\n"),
+            ],
+            Some("Add a and modify readme"),
+        )
+        .await;
+
+        create_test_session(
+            &git2,
+            &repo_path2,
+            "skip-conflict-b",
+            &[("README.md", "modified by B\n"), ("b.txt", "b\n")],
+            Some("Edit readme B"),
+        )
+        .await;
+
+        create_test_session(
+            &git2,
+            &repo_path2,
+            "skip-clean-c",
+            &[("c.txt", "clean-c content\n")],
+            Some("Add c"),
+        )
+        .await;
+
+        let manifest = make_manifest(
+            "skip-continues",
+            &[
+                ("skip-clean-a", Some("Add a")),
+                ("skip-conflict-b", Some("Edit readme B")),
+                ("skip-clean-c", Some("Add c")),
+            ],
+        );
+
+        let runner = MergeRunner::new(git2.clone(), repo_path2.clone());
+        let report = runner
+            .run(&manifest, MergeOpts::default(), &SkipConflictHandler)
+            .await
+            .expect("merge should succeed with skip handler");
+
+        // A and C should be merged, B should be skipped
+        assert_eq!(report.sessions_merged.len(), 3); // all appear in results
+        assert_eq!(report.sessions_merged[0].session_name, "skip-clean-a");
+        assert_eq!(
+            report.sessions_merged[0].resolution,
+            Some(ResolutionMethod::Clean)
+        );
+        assert_eq!(report.sessions_merged[1].session_name, "skip-conflict-b");
+        assert_eq!(
+            report.sessions_merged[1].resolution,
+            Some(ResolutionMethod::Skipped)
+        );
+        assert_eq!(report.sessions_merged[2].session_name, "skip-clean-c");
+        assert_eq!(
+            report.sessions_merged[2].resolution,
+            Some(ResolutionMethod::Clean)
+        );
+
+        // Report fields
+        assert_eq!(report.sessions_conflict_skipped, vec!["skip-conflict-b"]);
+        assert!(report.sessions_resolved.is_empty());
+
+        // Target branch should exist with A and C's changes
+        assert!(
+            git2.branch_exists("smelt/merge/skip-continues")
+                .await
+                .unwrap(),
+            "target branch should exist"
+        );
+    }
 }
