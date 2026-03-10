@@ -43,6 +43,9 @@ libc = "0.2"
 # Utilities
 which = "8"
 
+# Glob matching
+globset = "0.4"
+
 # Dev/test
 assert_cmd = "2"
 predicates = "3"

@@ -59,6 +59,14 @@ pub enum SmeltError {
     /// State file deserialization error.
     #[error("failed to parse state file: {0}")]
     StateDeserialization(String),
+
+    /// Manifest parsing or validation error.
+    #[error("manifest error: {0}")]
+    ManifestParse(String),
+
+    /// Session-specific error.
+    #[error("session '{session}': {message}")]
+    SessionError { session: String, message: String },
 }
 
 impl SmeltError {

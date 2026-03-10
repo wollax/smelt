@@ -16,6 +16,7 @@ which.workspace = true
 chrono.workspace = true
 dialoguer.workspace = true
 libc.workspace = true
+globset.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
