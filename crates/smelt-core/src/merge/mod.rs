@@ -42,6 +42,13 @@ impl<G: GitOps + Clone> MergeRunner<G> {
         Self { git, repo_root }
     }
 
+    /// Resolve effective strategy: CLI flag > manifest field > default.
+    fn resolve_strategy(opts: &MergeOpts, manifest: &Manifest) -> MergeOrderStrategy {
+        opts.strategy
+            .or(manifest.manifest.merge_strategy)
+            .unwrap_or_default()
+    }
+
     /// Compute a merge plan without executing the merge.
     ///
     /// Validates state, collects sessions, resolves strategy, and computes ordering.
@@ -55,10 +62,7 @@ impl<G: GitOps + Clone> MergeRunner<G> {
 
         let (completed, _skipped) = self.collect_sessions(manifest, &smelt_dir).await?;
 
-        let strategy = opts
-            .strategy
-            .or(manifest.manifest.merge_strategy)
-            .unwrap_or_default();
+        let strategy = Self::resolve_strategy(&opts, manifest);
 
         let (_ordered, merge_plan) = ordering::order_sessions(completed, strategy);
 
@@ -79,15 +83,12 @@ impl<G: GitOps + Clone> MergeRunner<G> {
         let (completed, skipped) = self.collect_sessions(manifest, &smelt_dir).await?;
 
         // Resolve effective strategy: CLI > manifest > default
-        let strategy = opts
-            .strategy
-            .or(manifest.manifest.merge_strategy)
-            .unwrap_or_default();
+        let strategy = Self::resolve_strategy(&opts, manifest);
 
         // Order sessions according to strategy
         let (ordered, merge_plan) = ordering::order_sessions(completed, strategy);
         info!(
-            "Merge order strategy: {:?}{}",
+            "Merge order strategy: {}{}",
             strategy,
             if merge_plan.fell_back {
                 " (fell back to completion-time)"
@@ -243,20 +244,27 @@ impl<G: GitOps + Clone> MergeRunner<G> {
                         .base_ref
                         .as_deref()
                         .unwrap_or(&manifest.manifest.base_ref);
-                    let changed_files = match self
+                    let (changed_files, files_unavailable) = match self
                         .git
                         .diff_name_only(base_ref, &state.branch_name)
                         .await
                     {
-                        Ok(files) => files.into_iter().collect::<HashSet<String>>(),
+                        Ok(files) => (files.into_iter().collect::<HashSet<String>>(), false),
                         Err(e) => {
                             warn!(
-                                "failed to get changed files for session '{}': {e}",
+                                "failed to get changed files for session '{}': {e} \
+                                 (file-overlap ordering may be inaccurate)",
                                 session_def.name
                             );
-                            HashSet::new()
+                            (HashSet::new(), true)
                         }
                     };
+                    if files_unavailable {
+                        warn!(
+                            "session '{}' has no file data — overlap scoring will treat it as zero-overlap",
+                            session_def.name
+                        );
+                    }
                     completed.push(CompletedSession {
                         session_name: state.session_name.clone(),
                         branch_name: state.branch_name.clone(),
@@ -778,7 +786,7 @@ mod tests {
             })
             .expect("should have A-B overlap");
         assert!(ab_overlap.overlapping_files.contains(&"shared.rs".to_string()));
-        assert!(ab_overlap.overlap_count >= 1);
+        assert!(ab_overlap.overlap_count() >= 1);
     }
 
     #[tokio::test]

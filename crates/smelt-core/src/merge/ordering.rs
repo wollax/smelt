@@ -47,8 +47,8 @@ fn file_overlap_order(sessions: Vec<CompletedSession>) -> (Vec<CompletedSession>
     let can_differentiate = if pairwise.len() <= 1 {
         false
     } else {
-        let first = pairwise[0].overlap_count;
-        pairwise.iter().any(|p| p.overlap_count != first)
+        let first = pairwise[0].overlap_count();
+        pairwise.iter().any(|p| p.overlap_count() != first)
     };
 
     if !can_differentiate {
@@ -66,9 +66,10 @@ fn file_overlap_order(sessions: Vec<CompletedSession>) -> (Vec<CompletedSession>
     let mut merged_files: HashSet<String> = HashSet::new();
     let mut remaining: Vec<Option<CompletedSession>> =
         sessions.into_iter().map(Some).collect();
-    let mut ordered: Vec<CompletedSession> = Vec::with_capacity(remaining.len());
+    let total = remaining.len();
+    let mut ordered: Vec<CompletedSession> = Vec::with_capacity(total);
 
-    while ordered.len() < remaining.len() || remaining.iter().any(|s| s.is_some()) {
+    for _ in 0..total {
         let mut best_idx = None;
         let mut best_overlap = usize::MAX;
         let mut best_original_index = usize::MAX;
@@ -109,17 +110,16 @@ pub(crate) fn compute_pairwise_overlaps(sessions: &[CompletedSession]) -> Vec<Pa
     let mut overlaps = Vec::new();
     for i in 0..sessions.len() {
         for j in (i + 1)..sessions.len() {
-            let files: Vec<String> = sessions[i]
+            let mut files: Vec<String> = sessions[i]
                 .changed_files
                 .intersection(&sessions[j].changed_files)
                 .cloned()
                 .collect();
-            let count = files.len();
+            files.sort();
             overlaps.push(PairwiseOverlap {
                 session_a: sessions[i].session_name.clone(),
                 session_b: sessions[j].session_name.clone(),
                 overlapping_files: files,
-                overlap_count: count,
             });
         }
     }
@@ -133,12 +133,10 @@ fn sessions_to_plan_entries(sessions: &[CompletedSession]) -> Vec<SessionPlanEnt
         .map(|s| {
             let mut files: Vec<String> = s.changed_files.iter().cloned().collect();
             files.sort();
-            let file_count = files.len();
             SessionPlanEntry {
                 session_name: s.session_name.clone(),
                 branch_name: s.branch_name.clone(),
                 changed_files: files,
-                file_count,
                 original_index: s.original_index,
             }
         })
@@ -194,7 +192,7 @@ mod tests {
         assert_eq!(plan.strategy, MergeOrderStrategy::FileOverlap);
         assert!(plan.fell_back);
         // Pairwise overlaps computed but all zero
-        assert!(plan.pairwise_overlaps.iter().all(|p| p.overlap_count == 0));
+        assert!(plan.pairwise_overlaps.iter().all(|p| p.overlap_count() == 0));
     }
 
     #[test]
@@ -230,7 +228,7 @@ mod tests {
         let overlaps = compute_pairwise_overlaps(&sessions);
 
         assert_eq!(overlaps.len(), 1);
-        assert_eq!(overlaps[0].overlap_count, 0);
+        assert_eq!(overlaps[0].overlap_count(), 0);
         assert!(overlaps[0].overlapping_files.is_empty());
     }
 
@@ -302,16 +300,16 @@ mod tests {
 
         // A-B: y.rs
         let ab = overlaps.iter().find(|p| p.session_a == "A" && p.session_b == "B").unwrap();
-        assert_eq!(ab.overlap_count, 1);
+        assert_eq!(ab.overlap_count(), 1);
         assert!(ab.overlapping_files.contains(&"y.rs".to_string()));
 
         // A-C: no overlap
         let ac = overlaps.iter().find(|p| p.session_a == "A" && p.session_b == "C").unwrap();
-        assert_eq!(ac.overlap_count, 0);
+        assert_eq!(ac.overlap_count(), 0);
 
         // B-C: z.rs
         let bc = overlaps.iter().find(|p| p.session_a == "B" && p.session_b == "C").unwrap();
-        assert_eq!(bc.overlap_count, 1);
+        assert_eq!(bc.overlap_count(), 1);
         assert!(bc.overlapping_files.contains(&"z.rs".to_string()));
     }
 }

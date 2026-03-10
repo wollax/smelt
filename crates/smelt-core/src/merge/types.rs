@@ -1,5 +1,8 @@
 //! Types for merge operations and reporting.
 
+use std::fmt;
+use std::str::FromStr;
+
 use serde::{Deserialize, Serialize};
 
 /// Strategy for ordering sessions during merge.
@@ -12,6 +15,29 @@ pub enum MergeOrderStrategy {
     CompletionTime,
     /// Order sessions by file overlap — merge least-overlapping first.
     FileOverlap,
+}
+
+impl fmt::Display for MergeOrderStrategy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::CompletionTime => write!(f, "completion-time"),
+            Self::FileOverlap => write!(f, "file-overlap"),
+        }
+    }
+}
+
+impl FromStr for MergeOrderStrategy {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "completion-time" => Ok(Self::CompletionTime),
+            "file-overlap" => Ok(Self::FileOverlap),
+            _ => Err(format!(
+                "unknown strategy '{s}' (expected: completion-time, file-overlap)"
+            )),
+        }
+    }
 }
 
 /// Options for a merge operation.
@@ -112,9 +138,15 @@ pub struct SessionPlanEntry {
     pub session_name: String,
     pub branch_name: String,
     pub changed_files: Vec<String>,
-    pub file_count: usize,
     /// Position in the original manifest order (0-indexed).
     pub original_index: usize,
+}
+
+impl SessionPlanEntry {
+    /// Number of changed files.
+    pub fn file_count(&self) -> usize {
+        self.changed_files.len()
+    }
 }
 
 /// Pairwise file overlap between two sessions.
@@ -123,5 +155,11 @@ pub struct PairwiseOverlap {
     pub session_a: String,
     pub session_b: String,
     pub overlapping_files: Vec<String>,
-    pub overlap_count: usize,
+}
+
+impl PairwiseOverlap {
+    /// Number of overlapping files.
+    pub fn overlap_count(&self) -> usize {
+        self.overlapping_files.len()
+    }
 }

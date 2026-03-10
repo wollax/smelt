@@ -41,13 +41,7 @@ pub enum MergeCommands {
 
 /// Parse a strategy string from the CLI into a `MergeOrderStrategy`.
 fn parse_strategy(s: &str) -> Result<MergeOrderStrategy, String> {
-    match s {
-        "completion-time" => Ok(MergeOrderStrategy::CompletionTime),
-        "file-overlap" => Ok(MergeOrderStrategy::FileOverlap),
-        _ => Err(format!(
-            "unknown strategy '{s}' (expected: completion-time, file-overlap)"
-        )),
-    }
+    s.parse()
 }
 
 /// Execute the `smelt merge run` command.
@@ -97,7 +91,7 @@ pub async fn execute_merge_run(
 
             if let Some(ref plan) = report.plan {
                 eprintln!(
-                    "Strategy: {:?}{}",
+                    "Strategy: {}{}",
                     plan.strategy,
                     if plan.fell_back {
                         " (fell back to completion-time)"
@@ -165,7 +159,7 @@ pub async fn execute_merge_plan(
     git: GitCli,
     repo_root: PathBuf,
     manifest_path: &str,
-    _target: Option<String>,
+    target: Option<String>,
     strategy: Option<MergeOrderStrategy>,
     json: bool,
 ) -> anyhow::Result<i32> {
@@ -178,7 +172,7 @@ pub async fn execute_merge_plan(
     };
 
     let runner = MergeRunner::new(git, repo_root);
-    let opts = MergeOpts::new(_target, strategy);
+    let opts = MergeOpts::new(target, strategy);
 
     match runner.plan(&manifest, opts).await {
         Ok(plan) => {
@@ -232,7 +226,7 @@ fn format_plan_table(plan: &MergePlan) -> String {
         table.add_row(vec![
             (i + 1).to_string(),
             entry.session_name.clone(),
-            entry.file_count.to_string(),
+            entry.file_count().to_string(),
             note,
         ]);
     }
@@ -266,7 +260,7 @@ fn format_plan_table(plan: &MergePlan) -> String {
                 overlap.session_a.clone(),
                 overlap.session_b.clone(),
                 files_display,
-                overlap.overlap_count.to_string(),
+                overlap.overlap_count().to_string(),
             ]);
         }
 
@@ -338,14 +332,12 @@ mod tests {
                     session_name: "alpha".to_string(),
                     branch_name: "smelt/alpha".to_string(),
                     changed_files: vec!["a.rs".to_string(), "shared.rs".to_string()],
-                    file_count: 2,
                     original_index: 0,
                 },
                 SessionPlanEntry {
                     session_name: "beta".to_string(),
                     branch_name: "smelt/beta".to_string(),
                     changed_files: vec!["b.rs".to_string(), "shared.rs".to_string()],
-                    file_count: 2,
                     original_index: 1,
                 },
             ],
@@ -353,7 +345,6 @@ mod tests {
                 session_a: "alpha".to_string(),
                 session_b: "beta".to_string(),
                 overlapping_files: vec!["shared.rs".to_string()],
-                overlap_count: 1,
             }],
         };
 
@@ -387,7 +378,6 @@ mod tests {
                 session_name: "only".to_string(),
                 branch_name: "smelt/only".to_string(),
                 changed_files: vec!["file.rs".to_string()],
-                file_count: 1,
                 original_index: 0,
             }],
             pairwise_overlaps: vec![],
@@ -406,14 +396,12 @@ mod tests {
                 session_name: "alpha".to_string(),
                 branch_name: "smelt/alpha".to_string(),
                 changed_files: vec!["a.rs".to_string()],
-                file_count: 1,
                 original_index: 0,
             }],
             pairwise_overlaps: vec![PairwiseOverlap {
                 session_a: "alpha".to_string(),
                 session_b: "beta".to_string(),
                 overlapping_files: vec!["shared.rs".to_string()],
-                overlap_count: 1,
             }],
         };
 
@@ -445,7 +433,6 @@ mod tests {
                 session_name: "big".to_string(),
                 branch_name: "smelt/big".to_string(),
                 changed_files: files,
-                file_count: 15,
                 original_index: 0,
             }],
             pairwise_overlaps: vec![],
