@@ -898,6 +898,7 @@ mod tests {
                 merge_strategy: None,
                 parallel_by_default: true,
                 on_failure,
+                shared_files: vec![],
             },
             sessions,
         }

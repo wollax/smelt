@@ -7,6 +7,7 @@ pub mod init;
 pub mod merge;
 pub mod orchestrate;
 pub mod session;
+pub mod summary;
 pub mod worktree;
 
 pub use ai::{AiConfig, AiProvider, GenAiProvider};
@@ -22,4 +23,5 @@ pub use orchestrate::{
     RunStateManager, SessionDag,
 };
 pub use session::{Manifest, SessionResult, SessionRunner};
+pub use summary::{FileStat, ScopeViolation, SessionSummary, SummaryReport, SummaryTotals};
 pub use worktree::{CreateWorktreeOpts, RemoveResult, WorktreeInfo, WorktreeManager};
