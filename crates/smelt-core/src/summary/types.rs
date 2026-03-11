@@ -25,6 +25,11 @@ pub struct ScopeViolation {
 }
 
 /// Per-session summary of changes, commit messages, and scope violations.
+///
+/// **Invariant:** `total_insertions` and `total_deletions` must equal the sum of
+/// their respective fields across `files`. These are materialised for efficient
+/// serialization; use [`collect_summary`](crate::summary::collect_summary) to
+/// construct instances that satisfy this invariant.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionSummary {
     pub session_name: String,
@@ -48,6 +53,14 @@ impl SessionSummary {
 }
 
 /// Aggregate totals across all sessions.
+///
+/// **Invariant:** all fields are derivable from `SummaryReport::sessions`.
+/// This struct is materialised once by [`collect_summary`](crate::summary::collect_summary)
+/// and is write-once — do not mutate after construction.
+///
+/// `sessions` counts *completed* sessions only (failed/skipped sessions are excluded).
+/// `files_changed` counts total file entries across sessions (the same file modified by
+/// two sessions is counted twice).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SummaryTotals {
     pub sessions: usize,

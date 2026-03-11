@@ -181,7 +181,9 @@ impl<G: GitOps + Clone + Send + Sync + 'static> Orchestrator<G> {
         .await
         {
             Ok(report) => {
-                state_manager.save_summary(&run_state.run_id, &report).ok();
+                if let Err(e) = state_manager.save_summary(&run_state.run_id, &report) {
+                    warn!("Failed to persist summary: {e}");
+                }
                 Some(report)
             }
             Err(e) => {
@@ -264,7 +266,9 @@ impl<G: GitOps + Clone + Send + Sync + 'static> Orchestrator<G> {
                 .await
                 {
                     Ok(report) => {
-                        state_manager.save_summary(&run_state.run_id, &report).ok();
+                        if let Err(e) = state_manager.save_summary(&run_state.run_id, &report) {
+                            warn!("Failed to persist summary: {e}");
+                        }
                         Some(report)
                     }
                     Err(e) => {
@@ -290,7 +294,13 @@ impl<G: GitOps + Clone + Send + Sync + 'static> Orchestrator<G> {
             }
             RunPhase::Merging => {
                 // Load previously-persisted summary (if available)
-                let summary_report = state_manager.load_summary(&run_state.run_id).ok();
+                let summary_report = match state_manager.load_summary(&run_state.run_id) {
+                    Ok(report) => Some(report),
+                    Err(e) => {
+                        warn!("Failed to load persisted summary: {e}");
+                        None
+                    }
+                };
 
                 // Skip directly to merge
                 let merge_report = self

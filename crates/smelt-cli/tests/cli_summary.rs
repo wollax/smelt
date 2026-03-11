@@ -370,7 +370,7 @@ files = [{ path = "a.txt", content = "a content\n" }]
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     let value: serde_json::Value =
-        serde_json::from_str(&stdout).expect(&format!("should be valid JSON, got: {stdout}"));
+        serde_json::from_str(&stdout).unwrap_or_else(|_| panic!("should be valid JSON, got: {stdout}"));
 
     // Summary field should be present and non-null
     assert!(

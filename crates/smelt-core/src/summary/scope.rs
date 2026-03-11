@@ -4,6 +4,7 @@
 //! Files matching `shared_files` globs are always considered in-scope for all sessions.
 
 use globset::{GlobSet, GlobSetBuilder};
+use tracing::warn;
 
 use crate::error::SmeltError;
 use crate::summary::types::ScopeViolation;
@@ -25,9 +26,13 @@ pub fn check_scope(
 
     let matcher = match build_scope_matcher(scope_patterns, shared_files) {
         Ok(m) => m,
-        Err(_) => {
+        Err(e) => {
             // Globs should have been validated at manifest parse time.
             // If they somehow fail here, treat everything as a violation.
+            warn!(
+                "Failed to build scope matcher for session '{session_name}': {e}; \
+                 treating all changed files as violations"
+            );
             return changed_files
                 .iter()
                 .map(|f| ScopeViolation {

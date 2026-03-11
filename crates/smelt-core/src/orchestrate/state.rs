@@ -2,6 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
+use tracing::warn;
+
 use crate::orchestrate::types::{RunPhase, RunState};
 use crate::summary::SummaryReport;
 
@@ -29,7 +31,7 @@ pub struct RunStateManager {
 }
 
 impl RunStateManager {
-    /// Create a new manager rooted at `smelt_dir/.../runs/`.
+    /// Create a new manager rooted at `smelt_dir/runs/`.
     pub fn new(smelt_dir: &Path) -> Self {
         Self {
             runs_dir: smelt_dir.join("runs"),
@@ -41,9 +43,9 @@ impl RunStateManager {
     /// Also creates the `logs/` subdirectory for session output capture.
     pub fn save_state(&self, state: &RunState) -> crate::Result<()> {
         let run_dir = self.runs_dir.join(&state.run_id);
-        // RunState::save already creates the directory
+        // RunState::save creates the run directory via create_dir_all
         state.save(&run_dir)?;
-        // Ensure logs directory exists
+        // Create the logs/ subdirectory for session output capture
         let logs_dir = run_dir.join("logs");
         std::fs::create_dir_all(&logs_dir)
             .map_err(|e| crate::SmeltError::io("creating logs directory", &logs_dir, e))?;
@@ -91,7 +93,10 @@ impl RunStateManager {
 
             let state = match RunState::load(&entry.path()) {
                 Ok(s) => s,
-                Err(_) => continue,
+                Err(e) => {
+                    warn!("Skipping corrupt run state at {}: {e}", entry.path().display());
+                    continue;
+                }
             };
 
             if !state.is_resumable() {
@@ -190,7 +195,10 @@ impl RunStateManager {
 
             let state = match RunState::load(&entry.path()) {
                 Ok(s) => s,
-                Err(_) => continue,
+                Err(e) => {
+                    warn!("Skipping corrupt run state at {}: {e}", entry.path().display());
+                    continue;
+                }
             };
 
             if state.phase != RunPhase::Complete {
@@ -423,7 +431,7 @@ mod tests {
 
         let manager = RunStateManager::new(&smelt_dir);
 
-        // Create two completed runs with different timestamps
+        // Create two completed runs with explicit timestamps (no sleep needed)
         let mut state1 = RunState::new(
             "my-feat-20260310-100000".to_string(),
             "my-feat".to_string(),
@@ -432,10 +440,10 @@ mod tests {
             &["s1".to_string()],
         );
         state1.phase = RunPhase::Complete;
+        state1.updated_at = chrono::DateTime::parse_from_rfc3339("2026-03-10T10:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
         manager.save_state(&state1).expect("save state1");
-
-        // Small delay to ensure different updated_at
-        std::thread::sleep(std::time::Duration::from_millis(10));
 
         let mut state2 = RunState::new(
             "my-feat-20260310-110000".to_string(),
@@ -445,6 +453,9 @@ mod tests {
             &["s1".to_string()],
         );
         state2.phase = RunPhase::Complete;
+        state2.updated_at = chrono::DateTime::parse_from_rfc3339("2026-03-10T11:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
         manager.save_state(&state2).expect("save state2");
 
         let found = manager

@@ -11,7 +11,7 @@ use smelt_core::{Manifest, RunStateManager};
 #[derive(clap::Args)]
 pub struct SummaryArgs {
     /// Path to the manifest TOML file
-    pub manifest: String,
+    pub manifest: PathBuf,
 
     /// Show a specific run (defaults to latest completed run)
     #[arg(long)]
@@ -32,7 +32,7 @@ pub async fn execute_summary(
     args: SummaryArgs,
 ) -> anyhow::Result<i32> {
     // Load manifest to derive manifest name
-    let manifest = match Manifest::load(std::path::Path::new(&args.manifest)) {
+    let manifest = match Manifest::load(&args.manifest) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("Error: {e}");
@@ -70,9 +70,16 @@ pub async fn execute_summary(
     };
 
     if args.json {
-        let output = serde_json::to_string_pretty(&report)?;
-        println!("{output}");
-        return Ok(0);
+        match serde_json::to_string_pretty(&report) {
+            Ok(output) => {
+                println!("{output}");
+                return Ok(0);
+            }
+            Err(e) => {
+                eprintln!("Error serializing summary: {e}");
+                return Ok(1);
+            }
+        }
     }
 
     // Human-readable output
@@ -90,7 +97,7 @@ pub async fn execute_summary(
 }
 
 /// Format a compact summary table with Session | Files | +Lines | -Lines columns.
-pub fn format_summary_table(report: &SummaryReport) -> String {
+pub(crate) fn format_summary_table(report: &SummaryReport) -> String {
     let mut output = String::new();
 
     output.push_str("Summary:\n");
@@ -124,7 +131,7 @@ pub fn format_summary_table(report: &SummaryReport) -> String {
 }
 
 /// Format scope violations section. Returns `None` if no violations exist.
-pub fn format_violations(report: &SummaryReport) -> Option<String> {
+pub(crate) fn format_violations(report: &SummaryReport) -> Option<String> {
     if !report.has_violations() {
         return None;
     }

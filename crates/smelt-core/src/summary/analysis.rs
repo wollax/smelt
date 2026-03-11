@@ -12,7 +12,9 @@ use crate::summary::scope::check_scope;
 use crate::summary::types::{FileStat, SessionSummary, SummaryReport, SummaryTotals};
 
 /// Derive session branch name from session name.
-/// Matches the convention used by [`crate::worktree::WorktreeManager`].
+///
+/// Duplicates the naming convention from [`crate::worktree::WorktreeManager`].
+/// If the worktree branch naming convention changes, this must be updated too.
 fn session_branch_name(session_name: &str) -> String {
     format!("smelt/{session_name}")
 }
@@ -24,7 +26,7 @@ fn session_branch_name(session_name: &str) -> String {
 /// - Commit messages (via `log_subjects`)
 /// - Scope violations (via `check_scope`)
 ///
-/// Sessions without a terminal `Completed` state in `session_states` are skipped.
+/// Sessions missing from `session_states` or not in the `Completed` state are skipped.
 /// If git operations fail for a particular session (e.g. branch does not exist),
 /// that session is skipped with a warning rather than failing the entire operation.
 pub async fn collect_summary<G: GitOps>(
@@ -113,7 +115,8 @@ pub async fn collect_summary<G: GitOps>(
             });
         }
 
-        // Add any files from numstat that weren't in name_only (shouldn't happen, but defensive)
+        // Add any files from numstat that weren't in name_only.
+        // Unreachable with well-formed git output; kept as a safety net.
         for (ins, del, path) in &numstat {
             if !seen.contains(path.as_str()) {
                 files.push(FileStat {
