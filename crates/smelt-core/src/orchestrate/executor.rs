@@ -81,7 +81,7 @@ impl<G: GitOps + Clone + Send + Sync + 'static> Orchestrator<G> {
             if cancel.is_cancelled() {
                 self.mark_remaining_cancelled(&mut run_state, &on_status);
                 state_manager.save_state(&run_state)?;
-                return Ok(self.build_report(run_state, None, start.elapsed().as_secs_f64()));
+                return Ok(self.build_report(run_state, None, None, start.elapsed().as_secs_f64()));
             }
 
             let base_ref = session_def
@@ -168,8 +168,27 @@ impl<G: GitOps + Clone + Send + Sync + 'static> Orchestrator<G> {
             self.mark_remaining_cancelled(&mut run_state, &on_status);
             run_state.phase = RunPhase::Failed;
             state_manager.save_state(&run_state)?;
-            return Ok(self.build_report(run_state, None, start.elapsed().as_secs_f64()));
+            return Ok(self.build_report(run_state, None, None, start.elapsed().as_secs_f64()));
         }
+
+        // Phase 2.5: Collect summary (pre-merge analysis)
+        let summary_report = match crate::summary::collect_summary(
+            &self.git,
+            manifest,
+            &run_state.sessions,
+            &run_state.run_id,
+        )
+        .await
+        {
+            Ok(report) => {
+                state_manager.save_summary(&run_state.run_id, &report).ok();
+                Some(report)
+            }
+            Err(e) => {
+                warn!("Failed to collect summary: {e}");
+                None
+            }
+        };
 
         // Phase 3: Merge
         let merge_report = self
@@ -179,7 +198,7 @@ impl<G: GitOps + Clone + Send + Sync + 'static> Orchestrator<G> {
         let elapsed = start.elapsed().as_secs_f64();
         state_manager.save_state(&run_state)?;
 
-        Ok(self.build_report(run_state, merge_report, elapsed))
+        Ok(self.build_report(run_state, merge_report, summary_report, elapsed))
     }
 
     /// Resume an incomplete orchestration run.
@@ -230,9 +249,29 @@ impl<G: GitOps + Clone + Send + Sync + 'static> Orchestrator<G> {
                     return Ok(self.build_report(
                         run_state,
                         None,
+                        None,
                         start.elapsed().as_secs_f64(),
                     ));
                 }
+
+                // Collect summary before merge
+                let summary_report = match crate::summary::collect_summary(
+                    &self.git,
+                    manifest,
+                    &run_state.sessions,
+                    &run_state.run_id,
+                )
+                .await
+                {
+                    Ok(report) => {
+                        state_manager.save_summary(&run_state.run_id, &report).ok();
+                        Some(report)
+                    }
+                    Err(e) => {
+                        warn!("Failed to collect summary: {e}");
+                        None
+                    }
+                };
 
                 // Proceed to merge
                 let merge_report = self
@@ -247,9 +286,12 @@ impl<G: GitOps + Clone + Send + Sync + 'static> Orchestrator<G> {
 
                 let elapsed = start.elapsed().as_secs_f64();
                 state_manager.save_state(&run_state)?;
-                Ok(self.build_report(run_state, merge_report, elapsed))
+                Ok(self.build_report(run_state, merge_report, summary_report, elapsed))
             }
             RunPhase::Merging => {
+                // Load previously-persisted summary (if available)
+                let summary_report = state_manager.load_summary(&run_state.run_id).ok();
+
                 // Skip directly to merge
                 let merge_report = self
                     .merge_phase(
@@ -263,7 +305,7 @@ impl<G: GitOps + Clone + Send + Sync + 'static> Orchestrator<G> {
 
                 let elapsed = start.elapsed().as_secs_f64();
                 state_manager.save_state(&run_state)?;
-                Ok(self.build_report(run_state, merge_report, elapsed))
+                Ok(self.build_report(run_state, merge_report, summary_report, elapsed))
             }
             _ => Err(SmeltError::Orchestration {
                 message: format!("run is in {:?} phase and cannot be resumed", run_state.phase),
@@ -746,6 +788,7 @@ impl<G: GitOps + Clone + Send + Sync + 'static> Orchestrator<G> {
         &self,
         run_state: RunState,
         merge_report: Option<MergeReport>,
+        summary: Option<crate::summary::SummaryReport>,
         elapsed_secs: f64,
     ) -> OrchestrationReport {
         let outcome = run_state.phase;
@@ -754,6 +797,7 @@ impl<G: GitOps + Clone + Send + Sync + 'static> Orchestrator<G> {
             manifest_name: run_state.manifest_name,
             session_results: run_state.sessions,
             merge_report,
+            summary,
             elapsed_secs,
             outcome,
         }

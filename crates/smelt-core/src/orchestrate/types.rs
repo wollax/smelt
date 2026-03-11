@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::merge::types::{MergeOrderStrategy, MergeReport};
+use crate::summary::SummaryReport;
 
 /// Failure policy for orchestration — governs behavior when a session fails.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -209,6 +210,10 @@ pub struct OrchestrationReport {
     pub session_results: HashMap<String, SessionRunState>,
     /// Merge report (if merge phase was reached).
     pub merge_report: Option<MergeReport>,
+    /// Per-session summary with scope violation analysis.
+    /// Present when summary collection succeeds; `None` on collection errors
+    /// or when no sessions completed.
+    pub summary: Option<SummaryReport>,
     /// Total wall-clock elapsed time in seconds.
     pub elapsed_secs: f64,
     /// Final outcome.
