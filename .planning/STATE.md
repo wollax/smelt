@@ -3,16 +3,16 @@
 ## Current Position
 
 Phase: 10 of 10 — Real Agent Sessions
-Plan: 1 of 3 complete
+Plan: 2 of 3 complete
 Status: In progress
-Progress: ████████████████████████████░░ 28/30
+Progress: █████████████████████████████░ 29/30
 
-Last activity: 2026-03-11 — Completed 10-01-PLAN.md (AgentExecutor module)
+Last activity: 2026-03-11 — Completed 10-02-PLAN.md (Wire AgentExecutor into orchestrator/runner)
 
 ## Session Continuity
 
 Last session: 2026-03-11
-Stopped at: Completed 10-01-PLAN.md
+Stopped at: Completed 10-02-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -21,8 +21,8 @@ Resume file: None
 |--------|-------|
 | Phases completed | 9 |
 | Phases remaining | 1 (in progress) |
-| Plans completed (phase 10) | 1/3 |
-| Requirements covered | 28/30 |
+| Plans completed (phase 10) | 2/3 |
+| Requirements covered | 29/30 |
 | Blockers | 0 |
 | Technical debt items | 0 |
 
@@ -194,6 +194,11 @@ Resume file: None
 - SmeltError has 22 variants: original 21 + AgentNotFound
 - AgentExecutor takes stdout/stderr handles before select! to allow child.wait() (borrow) in all arms — wait_with_output() moves child
 - AgentExecutor has_commits=true on exit 0 (v0.1.0 limitation) — merge phase handles no-diff sessions gracefully
+- Orchestrator.check_agent_preflight() resolves claude binary before worktree creation; returns Option<PathBuf> (None when all sessions are scripted)
+- execute_sessions() accepts Option<&PathBuf> for claude_binary; agent sessions fail with clear error if None (preflight should prevent this)
+- SessionRunner.try_agent_session() gracefully degrades to Completed (no commits) when binary not found or execution fails — preserves backward compatibility
+- CLI prints "Detected N agent session(s) — using Claude Code backend" and exits early with install instructions when claude not found
+- task_file content cloned before spawn boundary in orchestrator; resolved inside async closure
 
 ### Blockers
 
