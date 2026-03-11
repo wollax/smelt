@@ -713,6 +713,20 @@ pub async fn execute_orchestrate_run(
         }
     };
 
+    // Detect agent sessions and print informational message
+    let agent_session_count = manifest.sessions.iter().filter(|s| s.script.is_none()).count();
+    if agent_session_count > 0 {
+        eprintln!(
+            "Detected {agent_session_count} agent session(s) — using Claude Code backend"
+        );
+        // Verify claude is available before proceeding
+        if smelt_core::resolve_claude_binary().is_err() {
+            eprintln!("Error: 'claude' CLI not found on PATH. Agent sessions require Claude Code to be installed.");
+            eprintln!("Install it from: https://docs.anthropic.com/en/docs/claude-code");
+            return Ok(1);
+        }
+    }
+
     // Read raw manifest content for hash computation
     let manifest_content = match std::fs::read_to_string(manifest_path) {
         Ok(c) => c,

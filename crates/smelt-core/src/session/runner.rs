@@ -1,11 +1,14 @@
 //! SessionRunner — coordinates manifest execution across worktrees.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
+use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use crate::error::{Result, SmeltError};
 use crate::git::GitOps;
+use crate::session::agent::{resolve_claude_binary, AgentExecutor};
 use crate::session::manifest::Manifest;
 use crate::session::script::ScriptExecutor;
 use crate::session::types::{SessionOutcome, SessionResult};
@@ -93,14 +96,28 @@ impl<G: GitOps + Clone> SessionRunner<G> {
                     }
                 }
                 None => {
-                    // No script — return a completed result with no commits
-                    SessionResult {
-                        session_name: session.name.clone(),
-                        outcome: SessionOutcome::Completed,
-                        steps_completed: 0,
-                        failure_reason: None,
-                        has_commits: false,
-                        duration: std::time::Duration::ZERO,
+                    // No script — attempt agent execution via Claude Code.
+                    // SessionRunner gracefully degrades to Completed (no
+                    // commits) when the claude binary is not found or when
+                    // the agent execution fails. The orchestrator path
+                    // (execute_sessions) handles failures strictly; this
+                    // standalone path favours backward compatibility.
+                    match Self::try_agent_session(
+                        session,
+                        &info.worktree_path,
+                        &smelt_dir,
+                    )
+                    .await
+                    {
+                        Some(result) => result,
+                        None => SessionResult {
+                            session_name: session.name.clone(),
+                            outcome: SessionOutcome::Completed,
+                            steps_completed: 0,
+                            failure_reason: None,
+                            has_commits: false,
+                            duration: std::time::Duration::ZERO,
+                        },
                     }
                 }
             };
@@ -150,6 +167,82 @@ impl<G: GitOps + Clone> SessionRunner<G> {
         }
 
         Ok(results)
+    }
+
+    /// Attempt to run an agent session via Claude Code. Returns `Some(result)`
+    /// on successful execution, or `None` to signal graceful degradation
+    /// (binary not found or execution failure in the standalone path).
+    async fn try_agent_session(
+        session: &crate::session::manifest::SessionDef,
+        worktree_path: &std::path::Path,
+        smelt_dir: &std::path::Path,
+    ) -> Option<SessionResult> {
+        let binary = match resolve_claude_binary() {
+            Ok(b) => b,
+            Err(_) => {
+                warn!(
+                    "claude binary not found, completing session without agent execution"
+                );
+                return None;
+            }
+        };
+
+        // Resolve task content
+        let task = match (&session.task, &session.task_file) {
+            (Some(t), _) => t.clone(),
+            (None, Some(tf)) => match tokio::fs::read_to_string(tf).await {
+                Ok(content) => content,
+                Err(e) => {
+                    warn!(
+                        "failed to read task_file '{}': {e}, completing session without agent execution",
+                        tf
+                    );
+                    return None;
+                }
+            },
+            (None, None) => {
+                warn!(
+                    "session '{}' has neither task nor task_file, completing without agent execution",
+                    session.name
+                );
+                return None;
+            }
+        };
+
+        let timeout_duration = session.timeout_secs.map(Duration::from_secs);
+        let log_path = smelt_dir
+            .join("logs")
+            .join(format!("{}.log", session.name));
+        let agent = AgentExecutor::new(
+            binary,
+            worktree_path.to_path_buf(),
+            log_path,
+            timeout_duration,
+        );
+
+        let scope_slice = session.file_scope.as_deref();
+        let cancel = CancellationToken::new();
+
+        match agent
+            .execute(&session.name, &task, scope_slice, None, cancel)
+            .await
+        {
+            Ok(result) if result.outcome == SessionOutcome::Completed => Some(result),
+            Ok(result) => {
+                warn!(
+                    "agent session '{}' did not complete successfully: {:?}, degrading to completed",
+                    session.name, result.outcome
+                );
+                None
+            }
+            Err(e) => {
+                warn!(
+                    "agent execution failed for session '{}': {e}, completing session without agent execution",
+                    session.name
+                );
+                None
+            }
+        }
     }
 }
 
