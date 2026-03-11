@@ -2,17 +2,17 @@
 
 ## Current Position
 
-Phase: 8 of 10 — Orchestration Plan & Task Graph
-Plan: 3 of 3 complete
-Status: Phase complete
-Progress: ████████████ 12/12
+Phase: 9 of 10 — Session Summary & Scope Isolation
+Plan: 1 of 3 complete
+Status: In progress
+Progress: █████████████████████████░░ 25/27
 
-Last activity: 2026-03-10 — Completed 08-03-PLAN.md (CLI command & integration tests)
+Last activity: 2026-03-11 — Completed 09-01-PLAN.md (summary types, manifest shared_files, scope checking)
 
 ## Session Continuity
 
-Last session: 2026-03-10T22:50:00Z
-Stopped at: Completed 08-03-PLAN.md
+Last session: 2026-03-11T10:14:36Z
+Stopped at: Completed 09-01-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -21,8 +21,8 @@ Resume file: None
 |--------|-------|
 | Phases completed | 8 |
 | Phases remaining | 2 |
-| Plans completed (phase 8) | 3/3 |
-| Requirements covered | 12/12 |
+| Plans completed (phase 9) | 1/3 |
+| Requirements covered | 25/27 |
 | Blockers | 0 |
 | Technical debt items | 0 |
 
@@ -177,6 +177,11 @@ Resume file: None
 - Resume detection: RunStateManager::find_incomplete_run() + manifest hash validation + dialoguer::Confirm prompt (TTY only)
 - --json outputs OrchestrationReport via serde_json::to_string_pretty to stdout
 - Exit code 0 on success, 1 on any failure/skip/cancel
+- ManifestMeta.shared_files uses #[serde(default)] for backward-compatible empty Vec
+- Summary types (SummaryReport, SessionSummary, ScopeViolation, FileStat, SummaryTotals) derive Serialize + Deserialize
+- check_scope() is opt-in: returns empty violations when file_scope is None
+- GlobSet-based scope matching combines file_scope + shared_files patterns; case-sensitive
+- ScopeViolation.file_scope captures session's file_scope patterns (not shared_files) for diagnostics
 
 ### Blockers
 
