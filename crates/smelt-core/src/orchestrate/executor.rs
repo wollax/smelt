@@ -25,6 +25,23 @@ use crate::session::script::ScriptExecutor;
 use crate::session::types::SessionOutcome;
 use crate::worktree::{CreateWorktreeOpts, WorktreeManager};
 
+/// Extract a human-readable message from a `JoinError` panic payload.
+fn extract_join_error_message(join_error: tokio::task::JoinError) -> String {
+    if join_error.is_cancelled() {
+        "task cancelled".to_string()
+    } else if let Ok(payload) = join_error.try_into_panic() {
+        if let Some(s) = payload.downcast_ref::<&str>() {
+            format!("task panicked: {s}")
+        } else if let Some(s) = payload.downcast_ref::<String>() {
+            format!("task panicked: {s}")
+        } else {
+            "task panicked with unknown payload".to_string()
+        }
+    } else {
+        "task failed with unknown JoinError".to_string()
+    }
+}
+
 /// Orchestrates the full execution lifecycle: DAG validation, worktree creation,
 /// parallel session execution, state persistence, and merge phase delegation.
 pub struct Orchestrator<G: GitOps + Clone> {
@@ -581,6 +598,7 @@ impl<G: GitOps + Clone + Send + Sync + 'static> Orchestrator<G> {
                             let scope_refs: Option<Vec<String>> = file_scope;
                             let scope_slice = scope_refs.as_deref();
 
+                            // model=None: per-session model override not yet wired (v0.1.0)
                             match agent.execute(&name_clone, &task, scope_slice, None, child_cancel).await {
                                 Ok(session_result) => {
                                     let duration = timer.elapsed().as_secs_f64();
@@ -621,9 +639,15 @@ impl<G: GitOps + Clone + Send + Sync + 'static> Orchestrator<G> {
                             if let Some(parent) = log_path.parent() {
                                 let _ = std::fs::create_dir_all(parent);
                             }
+                            let status_label = match &result {
+                                Ok(SessionRunState::Completed { .. }) => "completed",
+                                Ok(SessionRunState::Failed { .. }) => "failed",
+                                Ok(SessionRunState::Cancelled) => "cancelled",
+                                _ => "unknown",
+                            };
                             let _ = std::fs::write(
                                 &log_path,
-                                format!("Session '{}' completed\n", name_clone),
+                                format!("Session '{}' {status_label}\n", name_clone),
                             );
                         }
 
@@ -636,20 +660,7 @@ impl<G: GitOps + Clone + Send + Sync + 'static> Orchestrator<G> {
                     match handle.await {
                         Ok(result) => result,
                         Err(join_error) => {
-                            let msg = if join_error.is_cancelled() {
-                                "task cancelled".to_string()
-                            } else if let Ok(payload) = join_error.try_into_panic() {
-                                if let Some(s) = payload.downcast_ref::<&str>() {
-                                    format!("task panicked: {s}")
-                                } else if let Some(s) = payload.downcast_ref::<String>() {
-                                    format!("task panicked: {s}")
-                                } else {
-                                    "task panicked with unknown payload".to_string()
-                                }
-                            } else {
-                                "task failed with unknown JoinError".to_string()
-                            };
-                            (panic_name, Err(msg))
+                            (panic_name, Err(extract_join_error_message(join_error)))
                         }
                     }
                 });
@@ -685,25 +696,36 @@ impl<G: GitOps + Clone + Send + Sync + 'static> Orchestrator<G> {
                             // JoinError: task panicked or was cancelled.
                             // The session name is lost because JoinError doesn't carry it.
                             // This path should be unreachable — spawned tasks catch panics
-                            // internally via catch_unwind and return them as Failed results.
+                            // internally and return them as Failed results.
                             if join_error.is_cancelled() {
                                 continue;
                             }
-                            let panic_msg = if let Ok(reason) = join_error.try_into_panic() {
-                                if let Some(s) = reason.downcast_ref::<&str>() {
-                                    format!("task panicked (uncaught): {s}")
-                                } else if let Some(s) = reason.downcast_ref::<String>() {
-                                    format!("task panicked (uncaught): {s}")
-                                } else {
-                                    "task panicked (uncaught) with unknown payload".to_string()
-                                }
-                            } else {
-                                "task failed with unknown JoinError".to_string()
-                            };
+                            let panic_msg = extract_join_error_message(join_error);
                             warn!("{}", panic_msg);
-                            // Defensive: cannot map to a session. Log and continue — the
-                            // session will remain in `in_flight` but the catch_unwind wrapper
-                            // in the spawned task should prevent this path from being reached.
+                            // Defensive: drain any session from in_flight that is not in
+                            // completed_set or skipped_set. Without this, a truly uncaught
+                            // panic would leave the session in `in_flight` forever, stalling
+                            // the loop.
+                            let orphaned: Vec<NodeIndex> = in_flight
+                                .iter()
+                                .copied()
+                                .filter(|n| !completed_set.contains(n) && !skipped_set.contains(n))
+                                .collect();
+                            for node_idx in orphaned {
+                                in_flight.remove(&node_idx);
+                                if let Some(name) = dag.node_weight(node_idx) {
+                                    let state = SessionRunState::Failed {
+                                        reason: panic_msg.clone(),
+                                    };
+                                    run_state.sessions.insert(name.clone(), state.clone());
+                                    on_status(name, &state);
+                                    mark_skipped_dependents(
+                                        dag,
+                                        node_idx,
+                                        &mut skipped_set,
+                                    );
+                                }
+                            }
                             continue;
                         }
                     };

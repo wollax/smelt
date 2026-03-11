@@ -269,11 +269,15 @@ impl AgentExecutor {
             let mut stdout_buf = Vec::new();
             let mut stderr_buf = Vec::new();
 
-            if let Some(mut out) = child_stdout {
-                let _ = out.read_to_end(&mut stdout_buf).await;
+            if let Some(mut out) = child_stdout
+                && let Err(e) = out.read_to_end(&mut stdout_buf).await
+            {
+                warn!("failed to read agent stdout: {e}");
             }
-            if let Some(mut err) = child_stderr {
-                let _ = err.read_to_end(&mut stderr_buf).await;
+            if let Some(mut err) = child_stderr
+                && let Err(e) = err.read_to_end(&mut stderr_buf).await
+            {
+                warn!("failed to read agent stderr: {e}");
             }
 
             std::process::Output {
@@ -289,8 +293,7 @@ impl AgentExecutor {
                 biased;
                 _ = cancel.cancelled() => {
                     info!(session = session_name, "cancellation requested, killing agent");
-                    kill_process_group(pid);
-                    let _ = child.wait().await;
+                    terminate_and_reap(&mut child, pid).await;
                     Ok(SessionResult {
                         session_name: session_name.to_string(),
                         outcome: SessionOutcome::Killed,
@@ -318,8 +321,7 @@ impl AgentExecutor {
                         }
                         Err(_elapsed) => {
                             info!(session = session_name, "timeout expired, killing agent");
-                            kill_process_group(pid);
-                            let _ = child.wait().await;
+                            terminate_and_reap(&mut child, pid).await;
                             Ok(SessionResult {
                                 session_name: session_name.to_string(),
                                 outcome: SessionOutcome::TimedOut,
@@ -341,8 +343,7 @@ impl AgentExecutor {
                 biased;
                 _ = cancel.cancelled() => {
                     info!(session = session_name, "cancellation requested, killing agent");
-                    kill_process_group(pid);
-                    let _ = child.wait().await;
+                    terminate_and_reap(&mut child, pid).await;
                     Ok(SessionResult {
                         session_name: session_name.to_string(),
                         outcome: SessionOutcome::Killed,
@@ -409,7 +410,14 @@ impl AgentExecutor {
             let failure_reason = if stderr.is_empty() {
                 format!("agent exited with code {}", exit_code.unwrap_or(-1))
             } else if stderr.len() > 1000 {
-                format!("{}... (truncated)", &stderr[..1000])
+                // Truncate at a char boundary to avoid panicking on multi-byte UTF-8
+                let truncate_at = stderr
+                    .char_indices()
+                    .take_while(|(i, _)| *i < 1000)
+                    .last()
+                    .map(|(i, c)| i + c.len_utf8())
+                    .unwrap_or(0);
+                format!("{}... (truncated)", &stderr[..truncate_at])
             } else {
                 stderr.to_string()
             };
@@ -460,6 +468,22 @@ impl AgentExecutor {
     }
 }
 
+/// Send SIGTERM to the process group and wait up to 5 seconds for exit.
+/// If the process doesn't exit within the grace period, escalate to SIGKILL
+/// via `child.kill()` (which `kill_on_drop` would do anyway, but we make it
+/// explicit for clarity).
+async fn terminate_and_reap(child: &mut tokio::process::Child, pid: Option<u32>) {
+    kill_process_group(pid);
+    // Grace period for SIGTERM — escalate to SIGKILL if unresponsive
+    match tokio::time::timeout(Duration::from_secs(5), child.wait()).await {
+        Ok(_) => {} // exited (or already dead)
+        Err(_) => {
+            warn!("agent did not exit after SIGTERM; escalating to SIGKILL");
+            let _ = child.kill().await;
+        }
+    }
+}
+
 /// Send SIGTERM to the entire process group identified by `pid`.
 ///
 /// The process must have been spawned with `process_group(0)` so that
@@ -490,6 +514,14 @@ fn kill_process_group(pid: Option<u32>) {
     } else {
         debug!(pid, "sent SIGTERM to process group");
     }
+}
+
+/// Fallback for non-unix platforms — logs a warning since process group
+/// kill is not available. The `kill_on_drop(true)` on the child handle
+/// provides a safety net.
+#[cfg(not(unix))]
+fn kill_process_group(pid: Option<u32>) {
+    warn!(pid, "process group kill not supported on this platform; relying on kill_on_drop");
 }
 
 /// Resolve the `claude` CLI binary on `$PATH`.

@@ -121,32 +121,25 @@ timeout_secs = 120
 
 /// Walk a directory recursively and yield file paths.
 fn walkdir(root: std::path::PathBuf) -> impl Iterator<Item = std::path::PathBuf> {
-    let mut stack = vec![root];
+    let mut dir_stack = vec![root];
+    let mut file_buf: Vec<std::path::PathBuf> = Vec::new();
     std::iter::from_fn(move || {
-        while let Some(dir) = stack.pop() {
+        loop {
+            if let Some(file) = file_buf.pop() {
+                return Some(file);
+            }
+            let dir = dir_stack.pop()?;
             if let Ok(entries) = std::fs::read_dir(&dir) {
-                let mut files = Vec::new();
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.is_dir() {
-                        stack.push(path);
+                        dir_stack.push(path);
                     } else {
-                        files.push(path);
+                        file_buf.push(path);
                     }
-                }
-                if !files.is_empty() {
-                    // Return first, push rest back via stack trick
-                    let first = files.remove(0);
-                    // Store remaining files by pushing them — we'll re-discover them
-                    // Actually, just collect them all
-                    for f in files {
-                        stack.push(f); // files won't be is_dir, so they'll be yielded
-                    }
-                    return Some(first);
                 }
             }
         }
-        None
     })
 }
 

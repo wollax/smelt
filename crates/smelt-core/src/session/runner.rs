@@ -114,7 +114,10 @@ impl<G: GitOps + Clone> SessionRunner<G> {
                             session_name: session.name.clone(),
                             outcome: SessionOutcome::Completed,
                             steps_completed: 0,
-                            failure_reason: None,
+                            failure_reason: Some(
+                                "agent unavailable — degraded to completed (no commits)"
+                                    .to_string(),
+                            ),
                             has_commits: false,
                             duration: std::time::Duration::ZERO,
                         },
@@ -532,9 +535,12 @@ mod tests {
     async fn run_manifest_session_without_script_returns_completed() {
         let (_tmp, cli, repo_path) = setup_test_repo();
 
+        // task=None forces the "no task" early-return path in try_agent_session,
+        // so this test never spawns a real claude process regardless of whether
+        // the binary is installed.
         let manifest = simple_manifest(vec![SessionDef {
             name: "no-script".to_string(),
-            task: Some("A real agent task".to_string()),
+            task: None,
             task_file: None,
             file_scope: None,
             base_ref: None,
@@ -550,9 +556,7 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].session_name, "no-script");
         assert_eq!(results[0].outcome, SessionOutcome::Completed);
-        // When claude is on PATH the agent may run and produce commits;
-        // when absent, graceful degradation returns has_commits=false.
-        // Both are valid — the key invariant is Completed outcome.
+        assert!(!results[0].has_commits);
     }
 
     #[tokio::test]
