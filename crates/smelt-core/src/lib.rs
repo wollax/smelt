@@ -23,5 +23,7 @@ pub use orchestrate::{
     RunStateManager, SessionDag,
 };
 pub use session::{Manifest, SessionResult, SessionRunner};
-pub use summary::{FileStat, ScopeViolation, SessionSummary, SummaryReport, SummaryTotals};
+pub use summary::{
+    collect_summary, FileStat, ScopeViolation, SessionSummary, SummaryReport, SummaryTotals,
+};
 pub use worktree::{CreateWorktreeOpts, RemoveResult, WorktreeInfo, WorktreeManager};
