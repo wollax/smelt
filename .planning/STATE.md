@@ -2,17 +2,17 @@
 
 ## Current Position
 
-Phase: 9 of 10 — Session Summary & Scope Isolation
-Plan: 3 of 3 complete
-Status: Phase complete
-Progress: ███████████████████████████ 27/27
+Phase: 10 of 10 — Real Agent Sessions
+Plan: 1 of 3 complete
+Status: In progress
+Progress: ████████████████████████████░░ 28/30
 
-Last activity: 2026-03-11 — Completed 09-03-PLAN.md (CLI summary command, integration tests)
+Last activity: 2026-03-11 — Completed 10-01-PLAN.md (AgentExecutor module)
 
 ## Session Continuity
 
 Last session: 2026-03-11
-Stopped at: Completed 09-03-PLAN.md (phase 9 complete)
+Stopped at: Completed 10-01-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -20,9 +20,9 @@ Resume file: None
 | Metric | Value |
 |--------|-------|
 | Phases completed | 9 |
-| Phases remaining | 1 |
-| Plans completed (phase 9) | 3/3 |
-| Requirements covered | 27/27 |
+| Phases remaining | 1 (in progress) |
+| Plans completed (phase 10) | 1/3 |
+| Requirements covered | 28/30 |
 | Blockers | 0 |
 | Technical debt items | 0 |
 
@@ -191,6 +191,9 @@ Resume file: None
 - OrchestrationReport.summary is Option<SummaryReport> — None on collection failure or no completed sessions
 - Summary collected in "Phase 2.5" of orchestration: after sessions, before merge
 - Resume from Merging phase loads previously-persisted summary; resume from Sessions re-collects
+- SmeltError has 22 variants: original 21 + AgentNotFound
+- AgentExecutor takes stdout/stderr handles before select! to allow child.wait() (borrow) in all arms — wait_with_output() moves child
+- AgentExecutor has_commits=true on exit 0 (v0.1.0 limitation) — merge phase handles no-diff sessions gracefully
 
 ### Blockers
 
