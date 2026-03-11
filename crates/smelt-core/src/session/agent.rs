@@ -237,6 +237,9 @@ impl AgentExecutor {
         cmd.stderr(Stdio::piped());
         cmd.process_group(0);
         cmd.kill_on_drop(true);
+        // Clear CLAUDECODE env var to allow spawning Claude Code from within
+        // an existing Claude Code session (e.g., when Smelt is invoked by Claude).
+        cmd.env_remove("CLAUDECODE");
 
         info!(
             session = session_name,
