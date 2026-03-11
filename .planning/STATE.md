@@ -2,27 +2,27 @@
 
 ## Current Position
 
-Phase: 8 of 10 — Orchestration Plan & Task Graph
+Phase: 9 of 10 — Session Summary & Scope Isolation
 Plan: 3 of 3 complete
 Status: Phase complete
-Progress: ████████████ 12/12
+Progress: ███████████████████████████ 27/27
 
-Last activity: 2026-03-10 — Completed 08-03-PLAN.md (CLI command & integration tests)
+Last activity: 2026-03-11 — Completed 09-03-PLAN.md (CLI summary command, integration tests)
 
 ## Session Continuity
 
-Last session: 2026-03-10T22:50:00Z
-Stopped at: Completed 08-03-PLAN.md
+Last session: 2026-03-11
+Stopped at: Completed 09-03-PLAN.md (phase 9 complete)
 Resume file: None
 
 ## Performance Metrics
 
 | Metric | Value |
 |--------|-------|
-| Phases completed | 8 |
-| Phases remaining | 2 |
-| Plans completed (phase 8) | 3/3 |
-| Requirements covered | 12/12 |
+| Phases completed | 9 |
+| Phases remaining | 1 |
+| Plans completed (phase 9) | 3/3 |
+| Requirements covered | 27/27 |
 | Blockers | 0 |
 | Technical debt items | 0 |
 
@@ -177,6 +177,20 @@ Resume file: None
 - Resume detection: RunStateManager::find_incomplete_run() + manifest hash validation + dialoguer::Confirm prompt (TTY only)
 - --json outputs OrchestrationReport via serde_json::to_string_pretty to stdout
 - Exit code 0 on success, 1 on any failure/skip/cancel
+- ManifestMeta.shared_files uses #[serde(default)] for backward-compatible empty Vec
+- Summary types (SummaryReport, SessionSummary, ScopeViolation, FileStat, SummaryTotals) derive Serialize + Deserialize
+- check_scope() is opt-in: returns empty violations when file_scope is None
+- GlobSet-based scope matching combines file_scope + shared_files patterns; case-sensitive
+- ScopeViolation.file_scope captures session's file_scope patterns (not shared_files) for diagnostics
+- collect_summary() gathers diff_numstat + diff_name_only + log_subjects per completed session via GitOps
+- Binary files (in diff_name_only but not diff_numstat) included with insertions=0, deletions=0
+- Session branch naming for summary uses actual convention `smelt/<session_name>` (not manifest-prefixed)
+- Summary collection errors skip individual sessions with warn!() rather than failing entire operation
+- RunStateManager persists summary.json alongside state.json in .smelt/runs/<run_id>/
+- find_latest_completed_run() scans for Complete-phase runs by updated_at (for standalone `smelt summary`)
+- OrchestrationReport.summary is Option<SummaryReport> — None on collection failure or no completed sessions
+- Summary collected in "Phase 2.5" of orchestration: after sessions, before merge
+- Resume from Merging phase loads previously-persisted summary; resume from Sessions re-collects
 
 ### Blockers
 

@@ -31,6 +31,11 @@ pub struct ManifestMeta {
     pub parallel_by_default: bool,
     /// Failure policy for orchestration — governs behavior when a session fails.
     pub on_failure: Option<FailurePolicy>,
+    /// Glob patterns for files shared across all sessions.
+    /// Files matching these patterns are always considered in-scope,
+    /// regardless of individual session file_scope settings.
+    #[serde(default)]
+    pub shared_files: Vec<String>,
 }
 
 fn default_base_ref() -> String {
@@ -190,6 +195,15 @@ impl Manifest {
                         )));
                     }
                 }
+            }
+        }
+
+        // Validate shared_files globs
+        for pattern in &self.manifest.shared_files {
+            if let Err(e) = globset::Glob::new(pattern) {
+                return Err(SmeltError::ManifestParse(format!(
+                    "manifest has invalid shared_files glob pattern '{pattern}': {e}"
+                )));
             }
         }
 
@@ -360,6 +374,7 @@ files = [
                 merge_strategy: None,
                 parallel_by_default: true,
                 on_failure: None,
+                shared_files: vec![],
             },
             sessions: vec![],
         };
@@ -706,5 +721,52 @@ BAZ = "qux"
         let env = manifest.sessions[0].env.as_ref().expect("should have env");
         assert_eq!(env.get("FOO").unwrap(), "bar");
         assert_eq!(env.get("BAZ").unwrap(), "qux");
+    }
+
+    #[test]
+    fn parse_manifest_with_shared_files() {
+        let toml = r#"
+[manifest]
+name = "shared-files-test"
+shared_files = ["Cargo.toml", "Cargo.lock", "*.md"]
+
+[[session]]
+name = "s1"
+task = "Task"
+"#;
+        let manifest = Manifest::parse(toml).expect("should parse");
+        assert_eq!(manifest.manifest.shared_files, vec!["Cargo.toml", "Cargo.lock", "*.md"]);
+    }
+
+    #[test]
+    fn shared_files_defaults_to_empty() {
+        let toml = r#"
+[manifest]
+name = "no-shared"
+
+[[session]]
+name = "s1"
+task = "Task"
+"#;
+        let manifest = Manifest::parse(toml).expect("should parse");
+        assert!(manifest.manifest.shared_files.is_empty());
+    }
+
+    #[test]
+    fn validate_rejects_invalid_shared_files_glob() {
+        let toml = r#"
+[manifest]
+name = "bad-shared-glob"
+shared_files = ["[invalid"]
+
+[[session]]
+name = "s1"
+task = "Task"
+"#;
+        let err = Manifest::parse(toml).unwrap_err();
+        assert!(
+            err.to_string().contains("invalid shared_files glob pattern"),
+            "got: {err}"
+        );
     }
 }

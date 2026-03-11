@@ -674,6 +674,17 @@ fn format_orchestration_summary(report: &OrchestrationReport) -> String {
         ));
     }
 
+    // Summary table (per-session stats)
+    if let Some(ref summary) = report.summary {
+        output.push('\n');
+        output.push_str(&super::summary::format_summary_table(summary));
+
+        if let Some(violations) = super::summary::format_violations(summary) {
+            output.push('\n');
+            output.push_str(&violations);
+        }
+    }
+
     output.push_str(&format!("\nCompleted in {:.1}s\n", report.elapsed_secs));
 
     output

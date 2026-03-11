@@ -216,6 +216,7 @@ mod tests {
                 merge_strategy: None,
                 parallel_by_default: true,
                 on_failure: None,
+                shared_files: vec![],
             },
             sessions,
         }

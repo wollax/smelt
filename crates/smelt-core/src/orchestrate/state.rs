@@ -2,7 +2,10 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::orchestrate::types::RunState;
+use tracing::warn;
+
+use crate::orchestrate::types::{RunPhase, RunState};
+use crate::summary::SummaryReport;
 
 /// Compute a deterministic hash of manifest content for change detection.
 ///
@@ -28,7 +31,7 @@ pub struct RunStateManager {
 }
 
 impl RunStateManager {
-    /// Create a new manager rooted at `smelt_dir/.../runs/`.
+    /// Create a new manager rooted at `smelt_dir/runs/`.
     pub fn new(smelt_dir: &Path) -> Self {
         Self {
             runs_dir: smelt_dir.join("runs"),
@@ -40,9 +43,9 @@ impl RunStateManager {
     /// Also creates the `logs/` subdirectory for session output capture.
     pub fn save_state(&self, state: &RunState) -> crate::Result<()> {
         let run_dir = self.runs_dir.join(&state.run_id);
-        // RunState::save already creates the directory
+        // RunState::save creates the run directory via create_dir_all
         state.save(&run_dir)?;
-        // Ensure logs directory exists
+        // Create the logs/ subdirectory for session output capture
         let logs_dir = run_dir.join("logs");
         std::fs::create_dir_all(&logs_dir)
             .map_err(|e| crate::SmeltError::io("creating logs directory", &logs_dir, e))?;
@@ -90,7 +93,10 @@ impl RunStateManager {
 
             let state = match RunState::load(&entry.path()) {
                 Ok(s) => s,
-                Err(_) => continue,
+                Err(e) => {
+                    warn!("Skipping corrupt run state at {}: {e}", entry.path().display());
+                    continue;
+                }
             };
 
             if !state.is_resumable() {
@@ -115,6 +121,99 @@ impl RunStateManager {
             .join(run_id)
             .join("logs")
             .join(format!("{session_name}.log"))
+    }
+
+    /// Persist a [`SummaryReport`] to `<runs_dir>/<run_id>/summary.json`.
+    ///
+    /// The summary file shares the run directory lifetime. Any future cleanup
+    /// logic must preserve `summary.json` for standalone `smelt summary` access.
+    pub fn save_summary(&self, run_id: &str, report: &SummaryReport) -> crate::Result<()> {
+        let run_dir = self.runs_dir.join(run_id);
+        std::fs::create_dir_all(&run_dir)
+            .map_err(|e| crate::SmeltError::io("creating run directory for summary", &run_dir, e))?;
+
+        let path = run_dir.join("summary.json");
+        let json = serde_json::to_string_pretty(report).map_err(|e| {
+            crate::SmeltError::Orchestration {
+                message: format!("failed to serialize summary report: {e}"),
+            }
+        })?;
+
+        std::fs::write(&path, json)
+            .map_err(|e| crate::SmeltError::io("writing summary report", &path, e))?;
+
+        Ok(())
+    }
+
+    /// Load a [`SummaryReport`] from `<runs_dir>/<run_id>/summary.json`.
+    pub fn load_summary(&self, run_id: &str) -> crate::Result<SummaryReport> {
+        let path = self.runs_dir.join(run_id).join("summary.json");
+        let json = std::fs::read_to_string(&path)
+            .map_err(|e| crate::SmeltError::io("reading summary report", &path, e))?;
+
+        serde_json::from_str(&json).map_err(|e| crate::SmeltError::Orchestration {
+            message: format!("failed to deserialize summary report: {e}"),
+        })
+    }
+
+    /// Find the most recent completed run for a given manifest name.
+    ///
+    /// Scans `.smelt/runs/` for directories matching `<manifest_name>-*`,
+    /// loads each `state.json`, finds ones where phase is `Complete`,
+    /// and returns the `run_id` of the most recent (by `updated_at`).
+    ///
+    /// Returns `None` if no completed runs exist.
+    pub fn find_latest_completed_run(
+        &self,
+        manifest_name: &str,
+    ) -> crate::Result<Option<String>> {
+        if !self.runs_dir.exists() {
+            return Ok(None);
+        }
+
+        let prefix = format!("{manifest_name}-");
+        let entries = std::fs::read_dir(&self.runs_dir)
+            .map_err(|e| crate::SmeltError::io("reading runs directory", &self.runs_dir, e))?;
+
+        let mut best: Option<(String, chrono::DateTime<chrono::Utc>)> = None;
+
+        for entry in entries {
+            let entry = entry.map_err(|e| {
+                crate::SmeltError::io("reading runs directory entry", &self.runs_dir, e)
+            })?;
+
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if !name_str.starts_with(&prefix) {
+                continue;
+            }
+
+            let state_path = entry.path().join("state.json");
+            if !state_path.exists() {
+                continue;
+            }
+
+            let state = match RunState::load(&entry.path()) {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!("Skipping corrupt run state at {}: {e}", entry.path().display());
+                    continue;
+                }
+            };
+
+            if state.phase != RunPhase::Complete {
+                continue;
+            }
+
+            let dominated = best
+                .as_ref()
+                .is_some_and(|(_, ts)| *ts >= state.updated_at);
+            if !dominated {
+                best = Some((state.run_id.clone(), state.updated_at));
+            }
+        }
+
+        Ok(best.map(|(id, _)| id))
     }
 
     /// Remove the entire run directory on successful completion.
@@ -277,5 +376,117 @@ mod tests {
         let manager = RunStateManager::new(&smelt_dir);
         let found = manager.find_incomplete_run("anything").expect("find");
         assert!(found.is_none());
+    }
+
+    #[test]
+    fn save_and_load_summary_roundtrip() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let smelt_dir = tmp.path().join(".smelt");
+        std::fs::create_dir_all(&smelt_dir).unwrap();
+
+        let manager = RunStateManager::new(&smelt_dir);
+
+        let report = SummaryReport {
+            manifest_name: "test-manifest".to_string(),
+            run_id: "test-run-001".to_string(),
+            base_ref: "main".to_string(),
+            sessions: vec![crate::summary::SessionSummary {
+                session_name: "alpha".to_string(),
+                files: vec![crate::summary::FileStat {
+                    path: "src/a.rs".to_string(),
+                    insertions: 10,
+                    deletions: 2,
+                }],
+                total_insertions: 10,
+                total_deletions: 2,
+                commit_messages: vec!["Add A".to_string()],
+                violations: vec![],
+            }],
+            totals: crate::summary::SummaryTotals {
+                sessions: 1,
+                files_changed: 1,
+                insertions: 10,
+                deletions: 2,
+                violations: 0,
+            },
+        };
+
+        manager.save_summary("test-run-001", &report).expect("save");
+        let loaded = manager.load_summary("test-run-001").expect("load");
+
+        assert_eq!(loaded.manifest_name, "test-manifest");
+        assert_eq!(loaded.run_id, "test-run-001");
+        assert_eq!(loaded.base_ref, "main");
+        assert_eq!(loaded.sessions.len(), 1);
+        assert_eq!(loaded.sessions[0].session_name, "alpha");
+        assert_eq!(loaded.sessions[0].total_insertions, 10);
+        assert_eq!(loaded.totals.files_changed, 1);
+    }
+
+    #[test]
+    fn find_latest_completed_run_returns_newest() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let smelt_dir = tmp.path().join(".smelt");
+        std::fs::create_dir_all(&smelt_dir).unwrap();
+
+        let manager = RunStateManager::new(&smelt_dir);
+
+        // Create two completed runs with explicit timestamps (no sleep needed)
+        let mut state1 = RunState::new(
+            "my-feat-20260310-100000".to_string(),
+            "my-feat".to_string(),
+            "h1".to_string(),
+            FailurePolicy::SkipDependents,
+            &["s1".to_string()],
+        );
+        state1.phase = RunPhase::Complete;
+        state1.updated_at = chrono::DateTime::parse_from_rfc3339("2026-03-10T10:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        manager.save_state(&state1).expect("save state1");
+
+        let mut state2 = RunState::new(
+            "my-feat-20260310-110000".to_string(),
+            "my-feat".to_string(),
+            "h2".to_string(),
+            FailurePolicy::SkipDependents,
+            &["s1".to_string()],
+        );
+        state2.phase = RunPhase::Complete;
+        state2.updated_at = chrono::DateTime::parse_from_rfc3339("2026-03-10T11:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        manager.save_state(&state2).expect("save state2");
+
+        let found = manager
+            .find_latest_completed_run("my-feat")
+            .expect("find")
+            .expect("should find completed run");
+
+        assert_eq!(found, "my-feat-20260310-110000");
+    }
+
+    #[test]
+    fn find_latest_completed_run_ignores_incomplete() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let smelt_dir = tmp.path().join(".smelt");
+        std::fs::create_dir_all(&smelt_dir).unwrap();
+
+        let manager = RunStateManager::new(&smelt_dir);
+
+        // Create an incomplete run (Sessions phase)
+        let state = RunState::new(
+            "my-feat-20260310-120000".to_string(),
+            "my-feat".to_string(),
+            "h1".to_string(),
+            FailurePolicy::SkipDependents,
+            &["s1".to_string()],
+        );
+        manager.save_state(&state).expect("save");
+
+        let found = manager
+            .find_latest_completed_run("my-feat")
+            .expect("find");
+        assert!(found.is_none(), "incomplete run should not be returned");
     }
 }
