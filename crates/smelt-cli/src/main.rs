@@ -51,6 +51,9 @@ enum Commands {
         #[command(subcommand)]
         command: commands::orchestrate::OrchestrateCommands,
     },
+
+    /// Show summary of a completed orchestration run
+    Summary(commands::summary::SummaryArgs),
 }
 
 async fn run() -> anyhow::Result<i32> {
@@ -159,6 +162,9 @@ async fn run() -> anyhow::Result<i32> {
                     .await
                 }
             }
+        }
+        Some(Commands::Summary(args)) => {
+            commands::summary::execute_summary(repo_root, args).await
         }
         None => {
             let smelt_dir = repo_root.join(".smelt");
