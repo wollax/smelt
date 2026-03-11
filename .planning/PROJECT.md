@@ -2,37 +2,40 @@
 
 ## What This Is
 
-Smelt is an orchestration layer for autonomous, spec-driven software development. It coordinates multiple AI coding agent sessions — each running in their own worktrees with Assay-enforced quality gates — and merges their outputs into cohesive, tested, verified branches and PRs. Smelt handles what happens *between* agent sessions: conflict resolution, cross-session coordination, human escalation, and forge integration.
+Smelt is an orchestration layer for autonomous, multi-agent software development. It coordinates multiple AI coding agent sessions — each running in their own git worktrees — and merges their outputs into a single coherent branch with AI-assisted conflict resolution and human fallback. Smelt handles what happens *between* agent sessions: worktree management, merge orchestration, conflict resolution, scope verification, and session summarization.
 
 ## Core Value
 
-Autonomous multi-session development orchestration — multiple agents work in parallel on different parts of a codebase, and Smelt merges their work into a single coherent result that passes all quality gates.
+Autonomous multi-session development orchestration — multiple agents work in parallel on different parts of a codebase, and Smelt merges their work into a single coherent result.
 
-## Current Milestone: v0.1.0 Orchestration PoC
+## Current State
 
-**Goal:** Prove that Smelt can coordinate multiple agent sessions in worktrees and merge their outputs into a single coherent branch with AI-assisted conflict resolution.
+Shipped v0.1.0 Orchestration PoC with 18,158 lines of Rust across 2 crates (smelt-cli + smelt-core).
 
-**Target features:**
+**Tech stack:** Rust (Edition 2024), tokio async runtime, clap CLI, genai for LLM provider abstraction, petgraph for DAG scheduling, indicatif + comfy-table for terminal UX.
 
-- Coordinate 2+ agent sessions working in separate git worktrees on the same repo
-- Support real agent sessions (Claude Code) and simulated/scripted sessions for development and testing
-- Merge agent outputs from multiple worktrees into a single branch
-- AI-assisted conflict resolution with human fallback
-- Git as coordination substrate (no external database or message queue)
+**Capabilities shipped:**
+- Coordinate 2+ agent sessions (real Claude Code + scripted) in separate git worktrees
+- Sequential squash merge with file-overlap-based ordering intelligence
+- AI-assisted conflict resolution (Anthropic, OpenAI, Ollama, Gemini) with human fallback
+- DAG-based task graph with parallel dispatch, failure policies, crash recovery
+- Per-session summary with scope isolation verification
+- Git-native orchestration state (.smelt/ directory)
+- 286 tests passing (6 ignored — require Claude Code CLI)
 
 ## Requirements
 
 ### Validated
 
-(None yet — ship to validate)
+- Coordinate 2+ agent sessions working in separate worktrees on the same repo — v0.1.0
+- Support real agent sessions (Claude Code) and simulated/scripted sessions — v0.1.0
+- Merge agent outputs from multiple worktrees into a single branch — v0.1.0
+- AI-assisted conflict resolution with human fallback — v0.1.0
+- Use git as the coordination substrate (no external database or message queue) — v0.1.0
 
 ### Active
 
-- [ ] Coordinate 2+ agent sessions working in separate worktrees on the same repo
-- [ ] Support real agent sessions (Claude Code) and simulated/scripted sessions
-- [ ] Merge agent outputs from multiple worktrees into a single branch
-- [ ] AI-assisted conflict resolution with human fallback
-- [ ] Use git as the coordination substrate (no external database or message queue)
+(None — define requirements for next milestone via `/kata-add-milestone`)
 
 ### Deferred (future milestones)
 
@@ -60,7 +63,7 @@ Smelt is the middle layer in a three-tier stack:
 | Layer | Project | Responsibility |
 |-------|---------|---------------|
 | Top | **Assay** (Rust, v0.2.0) | Spec-driven development, dual-track quality gates (deterministic + AI-evaluated), context management |
-| Middle | **Smelt** | Multi-session orchestration, merging, conflict resolution, forge integration, human escalation |
+| Middle | **Smelt** (Rust, v0.1.0) | Multi-session orchestration, merging, conflict resolution, forge integration, human escalation |
 | Bottom | (Internal to Smelt for now) | Agent session lifecycle, worktree management. Extract later if standalone demand emerges. |
 
 ### Assay Integration Surface
@@ -117,17 +120,21 @@ Full brainstorm output from 3 explorer/challenger pairs available at `.planning/
 - **Assay compatibility**: Must consume Assay's existing output formats (gate run records, specs, checkpoints) without requiring Assay changes
 - **Git-native**: No external database or message queue for coordination. Git is the source of truth.
 - **Forge-agnostic design**: Internal abstractions must support GitHub, Azure DevOps, GitLab, and Forgejo even though GitHub ships first
-- **Language**: TBD — decision deferred to milestone planning when requirements are concrete. Candidates: Rust (ecosystem alignment with Assay), .NET/C# (developer comfort), or other based on what Smelt needs (git manipulation, IPC, CLI ergonomics)
+- **Language**: Rust — decided in v0.1.0, driven by ecosystem alignment with Assay, git CLI manipulation, async runtime (tokio), and single-binary distribution
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Smelt is orchestration, not container runtime | Container runtime is an implementation detail; orchestration is the product. Extract runtime later if standalone demand emerges. | — Pending |
-| Git as coordination substrate | No external dependencies. Inspectable with standard tools. Offline-capable. Proven by git-bug, git-notes. | — Pending |
-| Human interaction via forge, not custom app | Developers already live in GitHub/ADO/GitLab. Building a custom UI is massive surface area with no clear advantage. | — Pending |
-| Assay boundary: session-level quality, not cross-session orchestration | Assay owns specs + gates within a session. Smelt owns everything between sessions. Clean separation of concerns. | — Pending |
-| Language deferred | Decision should be driven by concrete requirements (git lib quality, IPC model, CLI framework), not preference alone. | — Pending |
+| Smelt is orchestration, not container runtime | Container runtime is an implementation detail; orchestration is the product. | Validated v0.1.0 |
+| Git as coordination substrate | No external dependencies. Inspectable with standard tools. Offline-capable. | Validated v0.1.0 |
+| Human interaction via forge, not custom app | Developers already live in GitHub/ADO/GitLab. Building a custom UI is massive surface area with no clear advantage. | Pending (forge integration deferred) |
+| Assay boundary: session-level quality, not cross-session orchestration | Assay owns specs + gates within a session. Smelt owns everything between sessions. | Pending (Assay integration deferred) |
+| Language: Rust | Ecosystem alignment with Assay, single-binary distribution, tokio async, strong typing for complex state machines. | Validated v0.1.0 |
+| Shell-out to git CLI behind trait | Avoids git2/gix maturity gaps for write operations. Trait abstraction allows future swap. | Validated v0.1.0 |
+| Sequential merge (not octopus) | Isolates conflicts to specific branch pairs. Simpler to reason about and resolve. | Validated v0.1.0 |
+| Human fallback before AI resolution | Safety net first, optimization second. Ensures working fallback path always exists. | Validated v0.1.0 |
+| RPITIT for async traits | No async-trait crate needed. Native Rust 1.85+ feature. | Validated v0.1.0 |
 
 ---
-*Last updated: 2026-03-09 — Milestone v0.1.0 started*
+*Last updated: 2026-03-11 — v0.1.0 milestone complete*
