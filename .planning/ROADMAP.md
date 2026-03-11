@@ -212,6 +212,14 @@ Smelt is a multi-agent orchestration layer that coordinates AI coding sessions i
 3. Agent process lifecycle is managed correctly — graceful shutdown on orchestrator interrupt, zombie prevention via process group management
 4. End-to-end: an orchestration plan with 2+ real agent sessions produces a merged branch with combined work
 
+**Plans:**
+
+| Plan | Wave | Title | Tasks |
+|------|------|-------|-------|
+| 10-01 | 1 | AgentExecutor module: spawn Claude Code, CLAUDE.md/settings injection, process lifecycle | AgentExecutor struct with execute(), prompt construction, CLAUDE.md + settings.json injection, timeout/cancel via tokio::select!, unit tests |
+| 10-02 | 2 | Orchestrator + SessionRunner integration, CLI preflight | Wire AgentExecutor into orchestrator dispatch (script=None branch), preflight `claude` binary check, SessionRunner dispatch, CLI startup message |
+| 10-03 | 3 | Integration tests + end-to-end verification | Agent executor integration tests (#[ignore] for CI), orchestrator e2e with 2 agent sessions, timeout/cancel tests, example manifest, manual verification |
+
 ---
 
 ## Progress Summary
